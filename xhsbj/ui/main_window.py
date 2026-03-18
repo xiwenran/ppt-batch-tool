@@ -1,0 +1,1139 @@
+import os
+import sys
+import subprocess
+
+from PyQt6.QtWidgets import (
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
+    QPushButton, QLabel, QLineEdit, QListWidget,
+    QFileDialog, QMessageBox, QComboBox, QTableWidget, QTableWidgetItem,
+    QHeaderView, QProgressBar, QFormLayout, QSpinBox,
+    QAbstractItemView, QFrame, QScrollArea, QDialog, QCheckBox, QDialogButtonBox,
+    QSizePolicy,
+)
+from PyQt6.QtCore import Qt, QSize, QSettings
+from PyQt6.QtGui import QFont, QColor
+
+from models.template_model import Template, TemplateManager
+from core.batch_runner import BatchRunner, VideoRunner, get_image_files
+from ui.canvas_widget import CanvasWidget
+
+# ── WeChat-style Light Mode palette ──────────────────────────────────────────
+_WIN   = "#F7F7F7"   # page background
+_SIDE  = "#EFEFEF"   # sidebar
+_CARD  = "#FFFFFF"   # card / container
+_INPUT = "#F0F0F0"   # input / field background
+_SEP   = "#E5E5E5"   # separator
+_TEXT  = "#191919"   # primary text
+_TEXT2 = "#888888"   # secondary text
+_TEXT3 = "#C6C6C6"   # placeholder / disabled
+_BLUE  = "#576B95"   # WeChat link blue (secondary)
+_GREEN = "#07C160"   # WeChat green (primary accent)
+_RED   = "#FA5151"   # WeChat red
+
+STYLE = f"""
+QMainWindow {{ background: {_WIN}; }}
+QWidget      {{ background: transparent; color: {_TEXT}; font-size: 13px; }}
+
+/* ── Containers ── */
+QWidget#sidebar {{ background: {_SIDE}; }}
+QWidget#card    {{ background: {_CARD}; border-radius: 12px; border: 1px solid {_SEP}; }}
+QWidget#inset   {{ background: {_WIN};  border-radius: 8px; border: 1px solid {_SEP}; }}
+
+/* ── Typography ── */
+QLabel {{ background: transparent; color: {_TEXT}; }}
+QLabel#h2     {{ font-size: 15px; font-weight: 600; }}
+QLabel#cap    {{ color: {_TEXT2}; font-size: 11px; font-weight: 500; }}
+QLabel#hint   {{ color: {_TEXT2}; font-size: 12px; }}
+QLabel#badge  {{
+    background: rgba(0,0,0,0.05);
+    color: {_TEXT2}; font-size: 12px; font-weight: 500;
+    padding: 3px 10px; border-radius: 6px;
+}}
+QLabel#badge_ok {{
+    background: rgba(7,193,96,0.12);
+    color: {_GREEN}; font-size: 12px; font-weight: 600;
+    padding: 3px 10px; border-radius: 6px;
+}}
+QLabel#step_n  {{
+    background: {_GREEN}; color: white;
+    font-size: 12px; font-weight: 700;
+    padding: 4px 11px; border-radius: 12px;
+}}
+QLabel#step_t  {{ font-size: 17px; font-weight: 700; color: {_TEXT}; }}
+QLabel#card_title {{ font-size: 15px; font-weight: 600; color: {_TEXT}; }}
+
+/* ── Inputs ── */
+QLineEdit, QSpinBox {{
+    background: {_INPUT}; border: 1px solid {_SEP}; border-radius: 8px;
+    padding: 9px 12px; color: {_TEXT};
+    selection-background-color: {_GREEN};
+}}
+QLineEdit:focus, QSpinBox:focus {{ border: 2px solid {_GREEN}; background: {_CARD}; }}
+QLineEdit[readOnly="true"] {{ color: {_TEXT2}; }}
+QSpinBox::up-button, QSpinBox::down-button {{
+    background: rgba(0,0,0,0.06); border: none;
+    width: 18px; border-radius: 3px; margin: 2px;
+}}
+
+/* ── Combo ── */
+QComboBox {{
+    background: {_INPUT}; border: 1px solid {_SEP};
+    border-radius: 8px; padding: 9px 12px; color: {_TEXT};
+}}
+QComboBox:focus {{ border: 2px solid {_GREEN}; background: {_CARD}; }}
+QComboBox::drop-down {{ border: none; width: 24px; subcontrol-position: right center; }}
+QComboBox QAbstractItemView {{
+    background: {_CARD}; border: 1px solid {_SEP};
+    border-radius: 10px; padding: 4px; outline: none;
+    selection-background-color: {_GREEN}; selection-color: white;
+    color: {_TEXT};
+}}
+
+/* ── Message boxes ── */
+QMessageBox {{
+    background: {_CARD};
+}}
+QMessageBox QLabel {{
+    color: {_TEXT}; font-size: 13px;
+}}
+QMessageBox QPushButton {{
+    background: {_INPUT}; color: {_TEXT}; border: 1px solid {_SEP};
+    border-radius: 8px; min-width: 72px; padding: 8px 16px;
+}}
+
+/* ── Buttons ── */
+QPushButton {{
+    background: {_INPUT}; border: none; border-radius: 8px;
+    padding: 8px 16px; color: {_TEXT}; font-weight: 500;
+}}
+QPushButton:hover   {{ background: #E5E5E5; }}
+QPushButton:pressed {{ background: #DCDCDC; }}
+QPushButton:disabled {{ color: {_TEXT3}; }}
+
+QPushButton#primary {{
+    background: {_GREEN}; color: white;
+    font-weight: 600; font-size: 14px; border-radius: 10px;
+}}
+QPushButton#primary:hover   {{ background: #06AD56; }}
+QPushButton#primary:pressed {{ background: #05994B; }}
+
+QPushButton#danger {{
+    background: transparent; color: {_RED};
+}}
+QPushButton#danger:hover {{ background: rgba(250,81,81,0.10); }}
+
+QPushButton#ghost {{
+    background: transparent; color: {_TEXT2};
+    padding: 6px 10px; font-size: 12px;
+}}
+QPushButton#ghost:hover {{ color: {_TEXT}; background: {_INPUT}; }}
+
+QPushButton#scan {{
+    background: rgba(7,193,96,0.10); color: {_GREEN};
+    border: 1px solid rgba(7,193,96,0.35);
+    font-weight: 600;
+}}
+QPushButton#scan:hover {{ background: rgba(7,193,96,0.18); }}
+
+/* ── Mode buttons — styled via Python setStyleSheet() per state ── */
+QPushButton#modeBtn {{
+    border: none; border-radius: 8px; padding: 10px 0px; font-size: 14px;
+}}
+
+/* ── List ── */
+QListWidget {{
+    background: transparent; border: none;
+    padding: 2px; outline: none;
+}}
+QListWidget::item {{
+    padding: 9px 12px; border-radius: 8px;
+    margin: 1px 0; color: {_TEXT};
+}}
+QListWidget::item:selected {{ background: rgba(7,193,96,0.15); color: {_GREEN}; }}
+QListWidget::item:hover:!selected {{ background: rgba(0,0,0,0.04); }}
+
+/* ── Tabs ── */
+QTabWidget::pane {{ border: none; background: {_WIN}; }}
+QTabBar {{ background: {_CARD}; border-bottom: 1px solid {_SEP}; }}
+QTabBar::tab {{
+    background: transparent; padding: 13px 28px;
+    color: {_TEXT2}; font-size: 13px; font-weight: 500;
+    border-bottom: 2px solid transparent; margin-bottom: -1px;
+}}
+QTabBar::tab:selected {{ color: {_GREEN}; border-bottom-color: {_GREEN}; }}
+QTabBar::tab:hover:!selected {{ color: {_TEXT}; }}
+
+/* ── Table ── */
+QTableWidget {{
+    background: transparent; border: none;
+    gridline-color: {_SEP}; outline: none;
+}}
+QTableWidget::item {{ padding: 10px 14px; border: none; color: {_TEXT}; }}
+QTableWidget::item:selected {{ background: rgba(7,193,96,0.12); color: {_TEXT}; }}
+QHeaderView::section {{
+    background: {_WIN}; color: {_TEXT2};
+    padding: 8px 14px; border: none;
+    border-bottom: 1px solid {_SEP};
+    font-size: 11px; font-weight: 600;
+}}
+QHeaderView {{ background: transparent; }}
+QTableCornerButton::section {{ background: transparent; border: none; }}
+
+/* ── Progress ── */
+QProgressBar {{
+    background: rgba(0,0,0,0.08); border: none;
+    border-radius: 3px; max-height: 6px;
+    text-align: center; color: transparent;
+}}
+QProgressBar::chunk {{ background: {_GREEN}; border-radius: 3px; }}
+
+/* ── Scrollbars ── */
+QScrollBar:vertical   {{ background: transparent; width: 6px; }}
+QScrollBar:horizontal {{ background: transparent; height: 6px; }}
+QScrollBar::handle {{ background: rgba(0,0,0,0.15); border-radius: 3px; min-height: 20px; }}
+QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; width: 0; }}
+QScrollBar::add-page,  QScrollBar::sub-page  {{ background: transparent; }}
+
+/* ── Separators ── */
+QFrame[frameShape="4"] {{ color: {_SEP}; max-height: 1px; }}
+QFrame[frameShape="5"] {{ color: {_SEP}; max-width:  1px; }}
+"""
+
+OUTPUT_PRESETS = {
+    "自动（背景图尺寸）":        (0, 0),
+    "1080 × 1920  (9:16 竖屏)": (1080, 1920),
+    "1920 × 1080  (16:9 横屏)": (1920, 1080),
+    "1080 × 1440  (3:4)":       (1080, 1440),
+    "1440 × 1080  (4:3)":       (1440, 1080),
+    "1080 × 1080  (1:1)":       (1080, 1080),
+    "自定义...":                 None,
+}
+
+
+# ── Native file/folder pickers ────────────────────────────────────────────────
+
+def _run_osascript(script: str):
+    """Run osascript. Returns (result_str, ran: bool).
+    ran=True means osascript was available (even if user cancelled).
+    ran=False means osascript not found → fall back to Qt dialog.
+    """
+    try:
+        r = subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True, text=True, timeout=120,
+        )
+        # returncode 0 = success, non-0 = user cancelled or other error
+        # Either way, osascript WAS available, so don't show Qt fallback
+        return r.stdout.strip() if r.returncode == 0 else "", True
+    except FileNotFoundError:
+        return "", False   # osascript not installed → use Qt
+
+
+def pick_image(parent, title="选择图片", default_dir="") -> str:
+    if sys.platform == "darwin":
+        loc = f' default location (POSIX file "{default_dir}")' if default_dir and os.path.isdir(default_dir) else ""
+        path, ran = _run_osascript(f'POSIX path of (choose file with prompt "{title}"{loc})')
+        if ran:
+            return path  # empty string if user cancelled
+    p, _ = QFileDialog.getOpenFileName(
+        parent, title, default_dir,
+        "图片文件 (*.png *.jpg *.jpeg *.bmp *.webp *.tiff)",
+        options=QFileDialog.Option.DontUseNativeDialog,
+    )
+    return p
+
+
+def pick_folder(parent, title="选择文件夹", default_dir="") -> str:
+    if sys.platform == "darwin":
+        loc = f' default location (POSIX file "{default_dir}")' if default_dir and os.path.isdir(default_dir) else ""
+        path, ran = _run_osascript(f'POSIX path of (choose folder with prompt "{title}"{loc})')
+        if ran:
+            return path.rstrip("/") if path else ""
+    return QFileDialog.getExistingDirectory(
+        parent, title, default_dir,
+        QFileDialog.Option.DontUseNativeDialog,
+    )
+
+
+# ── Layout helpers ────────────────────────────────────────────────────────────
+
+def _sep():
+    f = QFrame(); f.setFrameShape(QFrame.Shape.HLine); return f
+
+def _vsep():
+    f = QFrame(); f.setFrameShape(QFrame.Shape.VLine); return f
+
+def _lbl(text, obj_name=""):
+    l = QLabel(text)
+    if obj_name: l.setObjectName(obj_name)
+    return l
+
+def _row(*items, spacing=8) -> QHBoxLayout:
+    h = QHBoxLayout(); h.setSpacing(spacing)
+    for item in items:
+        if item is None:              h.addStretch()
+        elif isinstance(item, int):   h.addSpacing(item)
+        elif isinstance(item, QWidget): h.addWidget(item)
+        else:                         h.addLayout(item)
+    return h
+
+def _col(*items, spacing=8) -> QVBoxLayout:
+    v = QVBoxLayout(); v.setSpacing(spacing)
+    for item in items:
+        if item is None:              v.addStretch()
+        elif isinstance(item, int):   v.addSpacing(item)
+        elif isinstance(item, QWidget): v.addWidget(item)
+        else:                         v.addLayout(item)
+    return v
+
+class TemplatePickerDialog(QDialog):
+    """Multi-select dialog for choosing templates."""
+
+    def __init__(self, all_templates, preselected=None, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("选择场景模板")
+        self.setMinimumWidth(340)
+        self.setMinimumHeight(280)
+        self.setStyleSheet(f"""
+            QDialog {{ background: {_CARD}; }}
+            QWidget {{ background: transparent; color: {_TEXT}; font-size: 13px; }}
+            QLabel {{ color: {_TEXT}; }}
+            QScrollArea {{ background: {_INPUT}; border-radius: 8px; border: none; }}
+            QScrollBar:vertical {{ background: transparent; width: 6px; }}
+            QScrollBar::handle {{ background: rgba(0,0,0,0.15); border-radius: 3px; }}
+            QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; }}
+            QCheckBox {{ color: {_TEXT}; spacing: 8px; }}
+            QCheckBox::indicator {{
+                width: 18px; height: 18px; border-radius: 4px;
+                border: 2px solid {_SEP}; background: {_CARD};
+            }}
+            QCheckBox::indicator:checked {{ background: {_GREEN}; border-color: {_GREEN}; }}
+            QPushButton {{
+                background: {_INPUT}; color: {_TEXT}; border: 1px solid {_SEP};
+                border-radius: 8px; padding: 8px 16px; font-size: 13px;
+            }}
+            QPushButton:hover {{ background: #E5E5E5; }}
+            QDialogButtonBox QPushButton {{
+                background: {_INPUT}; color: {_TEXT}; border: 1px solid {_SEP};
+                border-radius: 8px; min-width: 64px; padding: 7px 18px; font-size: 13px;
+            }}
+            QDialogButtonBox QPushButton:hover {{ background: #E5E5E5; }}
+        """)
+
+        lv = QVBoxLayout(self)
+        lv.setContentsMargins(20, 16, 20, 16)
+        lv.setSpacing(10)
+
+        title = QLabel("选择要应用的模板（可多选）：")
+        title.setStyleSheet(f"font-size: 15px; font-weight: 600; color: {_TEXT};")
+        lv.addWidget(title)
+
+        # Scrollable checkbox area
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        inner = QWidget()
+        inner.setStyleSheet(f"background: {_CARD};")
+        iv = QVBoxLayout(inner)
+        iv.setContentsMargins(8, 8, 8, 8)
+        iv.setSpacing(8)
+
+        self._checks: list[QCheckBox] = []
+        preselected = set(preselected or [])
+        for t in all_templates:
+            cb = QCheckBox(t.name)
+            cb.setChecked(t.name in preselected)
+            iv.addWidget(cb)
+            self._checks.append(cb)
+        iv.addStretch()
+        scroll.setWidget(inner)
+        lv.addWidget(scroll)
+
+        # Select all / none row
+        row = QHBoxLayout()
+        btn_all  = QPushButton("全选")
+        btn_none = QPushButton("全不选")
+        btn_all.clicked.connect(lambda: [c.setChecked(True) for c in self._checks])
+        btn_none.clicked.connect(lambda: [c.setChecked(False) for c in self._checks])
+        row.addWidget(btn_all); row.addWidget(btn_none); row.addStretch()
+        lv.addLayout(row)
+
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        btns.accepted.connect(self.accept)
+        btns.rejected.connect(self.reject)
+        lv.addWidget(btns)
+
+    def selected_names(self) -> list:
+        return [c.text() for c in self._checks if c.isChecked()]
+
+
+def _card(*items, pad=(20,18,20,18)) -> QWidget:
+    w = QWidget(); w.setObjectName("card")
+    v = QVBoxLayout(w); v.setContentsMargins(*pad); v.setSpacing(12)
+    for item in items:
+        if isinstance(item, QWidget): v.addWidget(item)
+        else:                         v.addLayout(item)
+    return w
+
+def _step(num, title) -> QHBoxLayout:
+    badge = _lbl(num, "step_n")
+    badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    lbl = _lbl(title, "step_t")
+    return _row(badge, 4, lbl, None)
+
+def _btn(text, slot=None, style="", w=None) -> QPushButton:
+    b = QPushButton(text)
+    if style: b.setObjectName(style)
+    if w:     b.setFixedWidth(w)
+    if slot:  b.clicked.connect(slot)
+    return b
+
+
+# ── Main window ───────────────────────────────────────────────────────────────
+
+class MainWindow(QMainWindow):
+    def __init__(self, templates_dir: str):
+        super().__init__()
+        self.setWindowTitle("PPT 场景合成工具")
+        self.resize(1340, 840)
+        self.setMinimumSize(960, 640)
+        self.setStyleSheet(STYLE)
+
+        self.tm = TemplateManager(templates_dir)
+        self._batch_runner = None
+        self._loaded_tpl_name: str = None   # track which template is currently loaded
+        self._row_selections: dict = {}     # row index → list of template names
+        self._picked_image_files = []
+        # Per-picker last-used directories — persisted across sessions via QSettings
+        _home = os.path.expanduser("~")
+        self._settings = QSettings("xhsbj", "PPTComposer")
+        self._last_dir_bg      = self._settings.value("last_dir_bg",      _home)
+        self._last_dir_preview = self._settings.value("last_dir_preview",  _home)
+        self._last_dir_input   = self._settings.value("last_dir_input",    _home)
+        self._last_dir_output  = self._settings.value("last_dir_output",   _home)
+        self._last_dir_images  = self._settings.value("last_dir_images",   _home)
+        self._last_dir_videos  = self._settings.value("last_dir_videos",   _home)
+
+        self._build_ui()
+        self._set_batch_mode(0)   # apply initial mode button styles
+        self._refresh_template_list()
+
+    # ── Root ──────────────────────────────────────────────────────────────────
+
+    def _build_ui(self):
+        root = QWidget()
+        self.setCentralWidget(root)
+        lv = QVBoxLayout(root)
+        lv.setContentsMargins(0, 0, 0, 0); lv.setSpacing(0)
+        self.tabs = QTabWidget()
+        self.tabs.setTabPosition(QTabWidget.TabPosition.North)
+        lv.addWidget(self.tabs)
+        self.tabs.addTab(self._build_editor_tab(), "  模板配置  ")
+        self.tabs.addTab(self._build_batch_tab(),  "  批量导出  ")
+
+    # ── Editor tab ────────────────────────────────────────────────────────────
+
+    def _build_editor_tab(self):
+        tab = QWidget()
+        root = QHBoxLayout(tab)
+        root.setContentsMargins(0, 0, 0, 0); root.setSpacing(0)
+
+        # ── Sidebar ───────────────────────────────────────────────────────────
+        sidebar = QWidget(); sidebar.setObjectName("sidebar"); sidebar.setFixedWidth(420)
+        sidebar.setStyleSheet(f"QWidget#sidebar{{background:{_SIDE};border-right:1px solid {_SEP};}}")
+        sv = QVBoxLayout(sidebar)
+        sv.setContentsMargins(14, 16, 14, 16); sv.setSpacing(0)
+
+        # Section: template library
+        sv.addWidget(_lbl("模板库", "h2"))
+        sv.addSpacing(10)
+
+        self.template_list = QListWidget()
+        self.template_list.setMinimumHeight(130)
+        self.template_list.currentRowChanged.connect(self._on_template_selected)
+        sv.addWidget(self.template_list)
+        sv.addSpacing(8)
+
+        tpl_row = _row(_btn("+ 新建", self._new_template), _btn("删除", self._delete_template, "danger"))
+        sv.addLayout(tpl_row)
+        sv.addSpacing(16)
+        sv.addWidget(_sep())
+        sv.addSpacing(14)
+
+        # Section: scene settings
+        sv.addWidget(_lbl("场景配置", "h2"))
+        sv.addSpacing(10)
+
+        # Name
+        sv.addWidget(_lbl("名称", "cap"))
+        sv.addSpacing(4)
+        self.tpl_name_edit = QLineEdit(); self.tpl_name_edit.setPlaceholderText("模板名称…")
+        sv.addWidget(self.tpl_name_edit)
+        sv.addSpacing(10)
+
+        # Background
+        sv.addWidget(_lbl("背景图片", "cap"))
+        sv.addSpacing(4)
+        self.bg_path_edit = QLineEdit(); self.bg_path_edit.setReadOnly(True)
+        self.bg_path_edit.setPlaceholderText("点击选择背景图片")
+        btn_bg = _btn("选择", self._load_background, w=64)
+        bg_row = _row(self.bg_path_edit, btn_bg, spacing=6)
+        sv.addLayout(bg_row)
+        sv.addSpacing(10)
+
+        # Points
+        sv.addWidget(_lbl("屏幕角点", "cap"))
+        sv.addSpacing(4)
+        self.points_badge = _lbl("0 / 4 个角点", "badge")
+        sv.addLayout(_row(self.points_badge, None, _btn("清除", self._clear_points, "ghost")))
+        sv.addSpacing(10)
+
+        # Output size
+        sv.addWidget(_lbl("输出尺寸", "cap"))
+        sv.addSpacing(4)
+        self.output_size_combo = QComboBox()
+        for lbl in OUTPUT_PRESETS: self.output_size_combo.addItem(lbl)
+        self.output_size_combo.currentTextChanged.connect(
+            lambda t: self.custom_size_widget.setVisible(t == "自定义..."))
+        sv.addWidget(self.output_size_combo)
+
+        cw = QWidget()
+        cl = QHBoxLayout(cw); cl.setContentsMargins(0, 4, 0, 0); cl.setSpacing(6)
+        self.custom_w = QSpinBox(); self.custom_w.setRange(100, 8000); self.custom_w.setValue(1080)
+        self.custom_h = QSpinBox(); self.custom_h.setRange(100, 8000); self.custom_h.setValue(1920)
+        cl.addWidget(_lbl("W")); cl.addWidget(self.custom_w)
+        cl.addWidget(_lbl("H")); cl.addWidget(self.custom_h)
+        self.custom_size_widget = cw; cw.hide()
+        sv.addWidget(cw)
+        sv.addSpacing(16)
+        sv.addWidget(_sep())
+        sv.addSpacing(14)
+
+        # Section: preview
+        sv.addWidget(_lbl("嵌入预览（可选）", "h2"))
+        sv.addSpacing(6)
+        hint_prev = _lbl("加载一张 PPT 图片，实时查看嵌入效果", "hint")
+        hint_prev.setWordWrap(True)
+        sv.addWidget(hint_prev)
+        sv.addSpacing(8)
+        self.preview_path_edit = QLineEdit(); self.preview_path_edit.setReadOnly(True)
+        self.preview_path_edit.setPlaceholderText("未加载预览图片")
+        sv.addWidget(self.preview_path_edit)
+        sv.addSpacing(6)
+        sv.addLayout(_row(_btn("选择图片", self._load_preview), _btn("清除", self._clear_preview, "ghost")))
+        sv.addSpacing(16)
+        sv.addWidget(_sep())
+        sv.addSpacing(12)
+
+        # Hint
+        hint = _lbl("左键依次点击放置 4 个角点（TL → TR → BR → BL），拖拽调整位置，右键撤销", "hint")
+        hint.setWordWrap(True)
+        sv.addWidget(hint)
+        sv.addStretch()
+
+        btn_save = _btn("  保存模板", self._save_template, "primary")
+        btn_save.setFixedHeight(44)
+        sv.addWidget(btn_save)
+
+        root.addWidget(sidebar)
+
+        # ── Canvas ────────────────────────────────────────────────────────────
+        self.canvas = CanvasWidget()
+        self.canvas.points_changed.connect(self._on_points_changed)
+        root.addWidget(self.canvas, 1)
+        return tab
+
+    # ── Batch tab ─────────────────────────────────────────────────────────────
+
+    def _build_batch_tab(self):
+        # Outer scroll area
+        scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll_body = QWidget()
+        scroll.setWidget(scroll_body)
+        body_lv = QVBoxLayout(scroll_body)
+        body_lv.setContentsMargins(0, 0, 0, 0); body_lv.setSpacing(0)
+
+        # Centered content area (max 960px)
+        content = QWidget(); content.setMaximumWidth(960)
+        lv = QVBoxLayout(content)
+        lv.setContentsMargins(28, 28, 28, 28); lv.setSpacing(16)
+
+        h_center = QHBoxLayout(); h_center.setContentsMargins(0, 0, 0, 0)
+        h_center.addStretch(); h_center.addWidget(content); h_center.addStretch()
+        body_lv.addLayout(h_center); body_lv.addStretch()
+
+        # Mode selector — full-width pill tabs
+        mode_row = QHBoxLayout(); mode_row.setSpacing(8)
+        self._mode_btns = []
+        for i, label in enumerate(["📁  图片文件夹", "🖼  图片批量", "🎬  视频文件"]):
+            b = QPushButton(label)
+            b.setCheckable(True); b.setChecked(i == 0)
+            b.setObjectName("modeBtn"); b.setFixedHeight(44)
+            b.clicked.connect(lambda checked, idx=i: self._set_batch_mode(idx))
+            self._mode_btns.append(b)
+            mode_row.addWidget(b)
+        lv.addLayout(mode_row)
+        self._batch_mode = 0
+
+        # Step 1 — Folder card
+        c1_folder = _card(
+            _step("1", "图片文件夹"),
+            _lbl("选择主文件夹（内含子文件夹，每个子文件夹放一组图片；若无子文件夹则直接处理根目录图片）", "hint"),
+        )
+        self.input_dir_edit = QLineEdit(); self.input_dir_edit.setReadOnly(True)
+        self.input_dir_edit.setPlaceholderText("选择主文件夹路径…")
+        btn_scan = _btn("扫描文件夹", self._scan_subfolders, "scan")
+        c1_folder.layout().addLayout(_row(self.input_dir_edit, _btn("选择", self._browse_input, w=64), spacing=6))
+        c1_folder.layout().addWidget(btn_scan)
+        lv.addWidget(c1_folder)
+
+        # Step 1 — Image card (hidden by default)
+        c1_image = _card(
+            _step("1", "选择图片文件"),
+            _lbl("选择要嵌入的图片文件（可多选），统一应用所选模板", "hint"),
+        )
+        self.image_files_label = _lbl("未选择图片", "hint")
+        btn_pick_imgs = _btn("选择图片文件…", self._pick_image_files, "scan")
+        c1_image.layout().addWidget(btn_pick_imgs)
+        c1_image.layout().addWidget(self.image_files_label)
+        c1_image.hide()
+        lv.addWidget(c1_image)
+
+        # Step 1 — Video card (hidden by default)
+        c1_video = _card(
+            _step("1", "选择视频文件"),
+            _lbl("选择视频录制文件（如 PPT 录屏），视频每帧将被嵌入场景模板的背景图中，输出合成视频", "hint"),
+        )
+        btn_pick_vids = _btn("选择视频文件…", self._pick_video_files, "scan")
+        c1_video.layout().addWidget(btn_pick_vids)
+        # Video table: columns [视频文件名, 时长, PPT图片, 模板]
+        self.video_table = QTableWidget(0, 3)
+        self.video_table.setHorizontalHeaderLabels(["视频文件（每帧作为 PPT 内容嵌入场景）", "时长/帧数", "场景模板"])
+        vh = self.video_table.horizontalHeader()
+        vh.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        vh.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        vh.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.video_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.video_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.video_table.verticalHeader().setVisible(False)
+        self.video_table.setMinimumHeight(160)
+        self.video_table.setStyleSheet(f"QTableWidget::item:selected {{ background: rgba(7,193,96,0.18); color:{_TEXT}; }}")
+        vid_wrap = QWidget(); vid_wrap.setObjectName("inset")
+        vw = QVBoxLayout(vid_wrap); vw.setContentsMargins(0,0,0,0); vw.addWidget(self.video_table)
+        c1_video.layout().addWidget(vid_wrap)
+        c1_video.hide()
+        lv.addWidget(c1_video)
+        self._video_row_selections = {}  # row → [tpl_names]
+
+        # Store references for show/hide
+        self._c1_folder = c1_folder
+        self._c1_image = c1_image
+        self._c1_video = c1_video
+
+        # Step 2
+        c2 = _card(_step("2", "为每个子文件夹指定场景模板"))
+        tip2 = _lbl("每行可独立选择多个模板 — 点击「选择模板」按钮切换。「全部应用」可快速统一设置所有行。", "hint")
+        tip2.setWordWrap(True)
+        c2.layout().addWidget(tip2)
+
+        btn_qa = _btn("全部应用…", self._apply_all, "scan")
+        c2.layout().addLayout(_row(btn_qa, None))
+
+        self.subfolder_table = QTableWidget(0, 3)
+        self.subfolder_table.setHorizontalHeaderLabels(["子文件夹", "图片数", "已选模板（点击修改）"])
+        hh = self.subfolder_table.horizontalHeader()
+        hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        hh.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        hh.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.subfolder_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.subfolder_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.subfolder_table.verticalHeader().setVisible(False)
+        self.subfolder_table.setMinimumHeight(180)
+        self.subfolder_table.setRowHeight(0, 44)
+        self.subfolder_table.setStyleSheet(f"QTableWidget::item:selected {{ background: rgba(7,193,96,0.18); color:{_TEXT}; }}")
+
+        tbl_wrap = QWidget(); tbl_wrap.setObjectName("inset")
+        tw = QVBoxLayout(tbl_wrap); tw.setContentsMargins(0,0,0,0)
+        tw.addWidget(self.subfolder_table)
+        c2.layout().addWidget(tbl_wrap)
+        lv.addWidget(c2)
+        self._c2 = c2
+
+        # Step 3
+        c3 = _card(_step("3", "输出设置"))
+        self.output_dir_edit = QLineEdit(); self.output_dir_edit.setReadOnly(True)
+        self.output_dir_edit.setPlaceholderText("选择输出文件夹…")
+        c3.layout().addLayout(_row(self.output_dir_edit, _btn("选择", self._browse_output, w=64), spacing=6))
+
+        # Format selector (hidden in video mode; size comes from template)
+        self.format_combo = QComboBox(); self.format_combo.addItems(["PNG", "JPEG"])
+        self.format_combo.setFixedWidth(86)
+        self._format_row_widget = QWidget()
+        frw_layout = QHBoxLayout(self._format_row_widget)
+        frw_layout.setContentsMargins(0, 0, 0, 0); frw_layout.setSpacing(8)
+        frw_layout.addWidget(_lbl("图片格式:", "hint"))
+        frw_layout.addWidget(self.format_combo)
+        frw_layout.addWidget(_lbl("（输出尺寸使用模板中配置的规格）", "hint"))
+        frw_layout.addStretch()
+        c3.layout().addWidget(self._format_row_widget)
+        lv.addWidget(c3)
+
+        # Progress
+        self.progress_bar = QProgressBar(); self.progress_bar.setVisible(False)
+        lv.addWidget(self.progress_bar)
+        self.progress_label = _lbl("", "hint")
+        self.progress_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lv.addWidget(self.progress_label)
+
+        # Run / Abort
+        self.btn_run = _btn("  ▶   开始合成", self._run_batch, "primary")
+        self.btn_run.setFixedHeight(48)
+        self.btn_abort = _btn("  停止", self._abort_batch, "danger")
+        self.btn_abort.setFixedHeight(48)
+        self.btn_abort.setVisible(False)
+        lv.addLayout(_row(self.btn_run, self.btn_abort))
+        lv.addStretch()
+
+        outer = QWidget()
+        ol = QVBoxLayout(outer); ol.setContentsMargins(0,0,0,0)
+        ol.addWidget(scroll)
+        return outer
+
+    # ── Template management ───────────────────────────────────────────────────
+
+    def _refresh_template_list(self):
+        self.template_list.clear()
+        for t in self.tm.load_all():
+            self.template_list.addItem(t.name)
+
+    def _on_template_selected(self, row):
+        if row < 0: return
+        name = self.template_list.item(row).text()
+        tpl = self.tm.load(name)
+        if not tpl: return
+        self._loaded_tpl_name = name
+        self.tpl_name_edit.setText(tpl.name)
+        self.bg_path_edit.setText(tpl.background_path)
+        if os.path.exists(tpl.background_path):
+            self.canvas.set_background(tpl.background_path)
+            self.canvas.set_points(tpl.screen_points)
+        else:
+            QMessageBox.warning(self, "背景图片丢失", f"找不到：\n{tpl.background_path}")
+        if tpl.output_width == 0:
+            self.output_size_combo.setCurrentIndex(0)
+        else:
+            found = False
+            for lbl, size in OUTPUT_PRESETS.items():
+                if size and size == (tpl.output_width, tpl.output_height):
+                    self.output_size_combo.setCurrentText(lbl); found = True; break
+            if not found:
+                self.output_size_combo.setCurrentText("自定义...")
+                self.custom_w.setValue(tpl.output_width)
+                self.custom_h.setValue(tpl.output_height)
+
+    def _new_template(self):
+        self.template_list.clearSelection()
+        self._loaded_tpl_name = None
+        self.tpl_name_edit.clear()
+        self.bg_path_edit.clear()
+        self.preview_path_edit.clear()
+        self.canvas.clear_all()
+
+    def _delete_template(self):
+        item = self.template_list.currentItem()
+        if not item: return
+        name = item.text()
+        if QMessageBox.question(self, "确认删除", f"删除模板「{name}」？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        ) == QMessageBox.StandardButton.Yes:
+            self.tm.delete(name)
+            if self._loaded_tpl_name == name:
+                self._loaded_tpl_name = None
+            self._refresh_template_list()
+
+    def _save_template(self):
+        name = self.tpl_name_edit.text().strip()
+        if not name:
+            QMessageBox.warning(self, "提示", "请填写模板名称"); return
+        bg = self.bg_path_edit.text().strip()
+        if not bg:
+            QMessageBox.warning(self, "提示", "请选择背景图片"); return
+        if len(self.canvas.points) != 4:
+            QMessageBox.warning(self, "提示", "请在背景图片上放置 4 个角点"); return
+
+        # Overwrite guard: warn if name exists and it's NOT the template we loaded
+        if self.tm.load(name) and name != self._loaded_tpl_name:
+            reply = QMessageBox.question(self, "已存在同名模板",
+                f"模板「{name}」已存在，是否覆盖？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+        w, h = self._editor_output_size()
+        self.tm.save(Template(name, bg, self.canvas.points, w, h))
+        self._loaded_tpl_name = name
+        self._refresh_template_list()
+        for i in range(self.template_list.count()):
+            if self.template_list.item(i).text() == name:
+                self.template_list.setCurrentRow(i); break
+        QMessageBox.information(self, "已保存", f"模板「{name}」保存成功")
+
+    def _editor_output_size(self):
+        lbl = self.output_size_combo.currentText()
+        size = OUTPUT_PRESETS.get(lbl)
+        return (self.custom_w.value(), self.custom_h.value()) if size is None else size
+
+    # ── Editor canvas actions ─────────────────────────────────────────────────
+
+    def _load_background(self):
+        path = pick_image(self, "选择背景图片", self._last_dir_bg)
+        if path:
+            self._save_dir("bg", os.path.dirname(path))
+            self.bg_path_edit.setText(path)
+            self.canvas.set_background(path)
+
+    def _load_preview(self):
+        path = pick_image(self, "选择 PPT 预览图片", self._last_dir_preview)
+        if path:
+            self._save_dir("preview", os.path.dirname(path))
+            self.preview_path_edit.setText(path)
+            self.canvas.set_preview(path)
+
+    def _clear_preview(self):
+        self.preview_path_edit.clear(); self.canvas.clear_preview()
+
+    def _clear_points(self):
+        self.canvas.clear_points()
+
+    def _on_points_changed(self, points):
+        n = len(points)
+        if n == 4:
+            self.points_badge.setText("✓  4 / 4 个角点")
+            self.points_badge.setObjectName("badge_ok")
+        else:
+            self.points_badge.setText(f"{n} / 4 个角点")
+            self.points_badge.setObjectName("badge")
+        self.points_badge.setStyleSheet("")   # force QSS refresh
+
+    # ── Batch mode ────────────────────────────────────────────────────────────
+
+    def _set_batch_mode(self, idx: int):
+        self._batch_mode = idx
+        for i, b in enumerate(self._mode_btns):
+            b.setChecked(i == idx)
+            if i == idx:
+                b.setStyleSheet(f"QPushButton {{ background:{_GREEN}; color:white; font-weight:600; font-size:14px; border:none; border-radius:8px; padding:10px 0; }}")
+            else:
+                b.setStyleSheet(f"QPushButton {{ background:{_INPUT}; color:{_TEXT2}; font-size:14px; font-weight:500; border:none; border-radius:8px; padding:10px 0; }} QPushButton:hover {{ background:#E8E8E8; color:{_TEXT}; }}")
+        self._c1_folder.setVisible(idx == 0)
+        self._c1_image.setVisible(idx == 1)
+        self._c1_video.setVisible(idx == 2)
+        self._c2.setVisible(idx != 2)
+        self._format_row_widget.setVisible(idx != 2)  # no format selector for video
+
+    def _save_dir(self, key: str, path: str):
+        """Persist a picker's last-used directory to QSettings."""
+        setattr(self, f"_last_dir_{key}", path)
+        self._settings.setValue(f"last_dir_{key}", path)
+
+    # ── Batch actions ─────────────────────────────────────────────────────────
+
+    def _browse_input(self):
+        path = pick_folder(self, "选择 PPT 图片主文件夹", self._last_dir_input)
+        if path:
+            self._save_dir("input", path)
+            self.input_dir_edit.setText(path)
+
+    def _browse_output(self):
+        path = pick_folder(self, "选择输出文件夹", self._last_dir_output)
+        if path:
+            self._save_dir("output", path)
+            self.output_dir_edit.setText(path)
+
+    def _make_tpl_btn(self, row: int, selected_names: list) -> QPushButton:
+        """Create a template-picker button for a table row."""
+        def label():
+            n = len(self._row_selections.get(row, []))
+            return f"选择模板…" if n == 0 else f"{n} 个模板 ▾"
+
+        btn = QPushButton(label())
+        btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {_INPUT}; color: {_TEXT};
+                border: 1px solid {_SEP}; border-radius: 6px;
+                padding: 8px 12px; font-size: 13px;
+                text-align: left;
+            }}
+            QPushButton:hover {{ background: #E5E5E5; }}
+        """)
+
+        def open_picker():
+            templates = self.tm.load_all()
+            current = self._row_selections.get(row, [])
+            dlg = TemplatePickerDialog(templates, current, self)
+            if dlg.exec() == QDialog.DialogCode.Accepted:
+                self._row_selections[row] = dlg.selected_names()
+                btn.setText(label())
+
+        btn.clicked.connect(open_picker)
+        self._row_selections[row] = list(selected_names)
+        btn.setText(label())
+        return btn
+
+    def _make_video_tpl_btn(self, row: int, selected_names: list) -> QPushButton:
+        """Create a template-picker button for a video table row."""
+        def label():
+            n = len(self._video_row_selections.get(row, []))
+            return "选择模板…" if n == 0 else f"{n} 个模板 ▾"
+        btn = QPushButton(label())
+        btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {_INPUT}; color: {_TEXT};
+                border: 1px solid {_SEP}; border-radius: 6px;
+                padding: 8px 12px; font-size: 13px;
+                text-align: left;
+            }}
+            QPushButton:hover {{ background: #E5E5E5; }}
+        """)
+        def open_picker():
+            templates = self.tm.load_all()
+            current = self._video_row_selections.get(row, [])
+            dlg = TemplatePickerDialog(templates, current, self)
+            if dlg.exec() == QDialog.DialogCode.Accepted:
+                self._video_row_selections[row] = dlg.selected_names()
+                btn.setText(label())
+        btn.clicked.connect(open_picker)
+        self._video_row_selections[row] = list(selected_names)
+        btn.setText(label())
+        return btn
+
+    def _scan_subfolders(self):
+        input_dir = self.input_dir_edit.text().strip()
+        if not input_dir or not os.path.isdir(input_dir):
+            QMessageBox.warning(self, "提示", "请先选择有效的输入文件夹"); return
+        templates = self.tm.load_all()
+        if not templates:
+            QMessageBox.warning(self, "提示", "请先在「模板配置」中创建并保存场景模板"); return
+        subfolders = sorted(d for d in os.listdir(input_dir)
+                            if os.path.isdir(os.path.join(input_dir, d)))
+        self._row_selections = {}
+        self.subfolder_table.setRowCount(0)
+        for sf in subfolders:
+            row = self.subfolder_table.rowCount()
+            self.subfolder_table.insertRow(row)
+            self.subfolder_table.setItem(row, 0, QTableWidgetItem(sf))
+            n = len(get_image_files(os.path.join(input_dir, sf)))
+            ni = QTableWidgetItem(str(n))
+            ni.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.subfolder_table.setItem(row, 1, ni)
+            self.subfolder_table.setRowHeight(row, 44)
+            btn = self._make_tpl_btn(row, [])
+            self.subfolder_table.setCellWidget(row, 2, btn)
+        if not subfolders:
+            # Check for images directly in input_dir
+            imgs = get_image_files(input_dir)
+            if imgs:
+                row = self.subfolder_table.rowCount()
+                self.subfolder_table.insertRow(row)
+                self.subfolder_table.setItem(row, 0, QTableWidgetItem("(根目录)"))
+                ni = QTableWidgetItem(str(len(imgs)))
+                ni.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.subfolder_table.setItem(row, 1, ni)
+                self.subfolder_table.setRowHeight(row, 44)
+                btn = self._make_tpl_btn(row, [])
+                self.subfolder_table.setCellWidget(row, 2, btn)
+            else:
+                QMessageBox.information(self, "提示", "该文件夹内没有子文件夹也没有图片文件")
+
+    def _apply_all(self):
+        templates = self.tm.load_all()
+        if not templates:
+            QMessageBox.warning(self, "提示", "暂无模板"); return
+        dlg = TemplatePickerDialog(templates, [], self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        names = dlg.selected_names()
+        if not names:
+            return
+        for row in range(self.subfolder_table.rowCount()):
+            self._row_selections[row] = list(names)
+            btn = self.subfolder_table.cellWidget(row, 2)
+            if btn:
+                btn.setText(f"{len(names)} 个模板 ▾")
+
+    def _pick_image_files(self):
+        if sys.platform == "darwin":
+            loc = f' default location (POSIX file "{self._last_dir_images}")' if self._last_dir_images else ""
+            script = f'set f to (choose file with prompt "选择图片文件" of type {{"public.image"}}{loc} with multiple selections allowed)\nset out to ""\nrepeat with p in f\n    set out to out & POSIX path of p & "\\n"\nend repeat\nout'
+            result, ran = _run_osascript(script)
+            if ran:
+                paths = [p for p in result.strip().split("\n") if p]
+                if paths:
+                    self._save_dir("images", os.path.dirname(paths[0]))
+                self._picked_image_files = paths
+                self.image_files_label.setText(f"已选择 {len(paths)} 张图片" if paths else "未选择图片")
+                if paths:
+                    self._populate_image_mode_table()
+                return
+        # Qt fallback
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "选择图片文件", self._last_dir_images,
+            "图片 (*.png *.jpg *.jpeg *.bmp *.webp *.tiff)",
+            options=QFileDialog.Option.DontUseNativeDialog,
+        )
+        if paths:
+            self._save_dir("images", os.path.dirname(paths[0]))
+            self._picked_image_files = paths
+            self.image_files_label.setText(f"已选择 {len(paths)} 张图片")
+            self._populate_image_mode_table()
+
+    def _populate_image_mode_table(self):
+        self._row_selections = {}
+        self.subfolder_table.setRowCount(0)
+        row = 0
+        self.subfolder_table.insertRow(row)
+        self.subfolder_table.setItem(row, 0, QTableWidgetItem("图片批量"))
+        ni = QTableWidgetItem(str(len(self._picked_image_files)))
+        ni.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.subfolder_table.setItem(row, 1, ni)
+        self.subfolder_table.setRowHeight(row, 44)
+        btn = self._make_tpl_btn(row, [])
+        self.subfolder_table.setCellWidget(row, 2, btn)
+
+    def _pick_video_files(self):
+        if sys.platform == "darwin":
+            loc = f' default location (POSIX file "{self._last_dir_videos}")' if self._last_dir_videos else ""
+            script = f'set f to (choose file with prompt "选择视频文件"{loc} with multiple selections allowed)\nset out to ""\nrepeat with p in f\n    set out to out & POSIX path of p & "\\n"\nend repeat\nout'
+            result, ran = _run_osascript(script)
+            if ran:
+                paths = [p for p in result.strip().split("\n") if p]
+                if paths:
+                    self._save_dir("videos", os.path.dirname(paths[0]))
+                    self._populate_video_table(paths)
+                return
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "选择视频文件", self._last_dir_videos,
+            "视频 (*.mp4 *.mov *.avi *.mkv *.m4v *.wmv)",
+            options=QFileDialog.Option.DontUseNativeDialog,
+        )
+        if paths:
+            self._save_dir("videos", os.path.dirname(paths[0]))
+            self._populate_video_table(paths)
+
+    def _populate_video_table(self, paths: list):
+        import av
+        self._video_row_selections = {}
+        self.video_table.setRowCount(0)
+        for vp in paths:
+            try:
+                with av.open(vp) as c:
+                    vs = c.streams.video[0]
+                    n = vs.frames if vs.frames else 0
+                    fps = float(vs.average_rate or 25)
+            except Exception:
+                n, fps = 0, 25.0
+            dur = f"{int(n/fps//60):02d}:{int(n/fps%60):02d}  ({n}帧)"
+            row = self.video_table.rowCount()
+            self.video_table.insertRow(row)
+            self.video_table.setItem(row, 0, QTableWidgetItem(os.path.basename(vp)))
+            self.video_table.item(row, 0).setData(Qt.ItemDataRole.UserRole, vp)
+            di = QTableWidgetItem(dur)
+            di.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.video_table.setItem(row, 1, di)
+            self.video_table.setRowHeight(row, 44)
+            # Template picker button (column 2)
+            tpl_btn = self._make_video_tpl_btn(row, [])
+            self.video_table.setCellWidget(row, 2, tpl_btn)
+
+    def _run_batch(self):
+        output_dir = self.output_dir_edit.text().strip()
+        if not output_dir:
+            QMessageBox.warning(self, "提示", "请选择输出文件夹"); return
+
+        if self._batch_mode == 2:
+            # Video mode
+            self._run_video_batch(output_dir)
+            return
+
+        # Folder mode or image mode
+        if self._batch_mode == 0:
+            input_dir = self.input_dir_edit.text().strip()
+            if not input_dir or not os.path.isdir(input_dir):
+                QMessageBox.warning(self, "提示", "请选择有效的输入文件夹"); return
+
+        if self.subfolder_table.rowCount() == 0:
+            QMessageBox.warning(self, "提示", "请先扫描文件夹或选择图片"); return
+
+        tasks = []
+        for row in range(self.subfolder_table.rowCount()):
+            group_name = self.subfolder_table.item(row, 0).text()
+            names = self._row_selections.get(row, [])
+            templates = [t for name in names for t in [self.tm.load(name)] if t]
+            if not templates: continue
+
+            if self._batch_mode == 0:
+                # Folder mode
+                input_dir = self.input_dir_edit.text().strip()
+                if group_name == "(根目录)":
+                    files = get_image_files(input_dir)
+                else:
+                    files = get_image_files(os.path.join(input_dir, group_name))
+            else:
+                # Image mode
+                files = self._picked_image_files
+
+            if files:
+                tasks.append((group_name, files, templates))
+
+        if not tasks:
+            QMessageBox.warning(self, "提示", "请为至少一个组选择模板"); return
+
+        self._batch_runner = BatchRunner(
+            tasks, output_dir,
+            self.format_combo.currentText()
+        )
+        self._batch_runner.progress.connect(self._on_progress)
+        self._batch_runner.finished.connect(self._on_finished)
+        self.btn_run.setVisible(False); self.btn_abort.setVisible(True)
+        self.progress_bar.setVisible(True); self.progress_bar.setValue(0)
+        self.progress_label.setText("正在处理…")
+        self._batch_runner.start()
+
+    def _run_video_batch(self, output_dir: str):
+        from core.batch_runner import VideoRunner
+        if self.video_table.rowCount() == 0:
+            QMessageBox.warning(self, "提示", "请先选择视频文件"); return
+        tasks = []
+        for row in range(self.video_table.rowCount()):
+            item = self.video_table.item(row, 0)
+            video_path = item.data(Qt.ItemDataRole.UserRole)
+            names = self._video_row_selections.get(row, [])
+            templates = [t for name in names for t in [self.tm.load(name)] if t]
+            if not templates:
+                QMessageBox.warning(self, "提示", f"请为「{item.text()}」选择场景模板"); return
+            tasks.append((video_path, templates))
+        self._batch_runner = VideoRunner(tasks, output_dir)
+        self._batch_runner.progress.connect(self._on_progress)
+        self._batch_runner.finished.connect(self._on_finished)
+        self.btn_run.setVisible(False); self.btn_abort.setVisible(True)
+        self.progress_bar.setVisible(True); self.progress_bar.setValue(0)
+        self.progress_label.setText("正在处理视频…")
+        self._batch_runner.start()
+
+    def _abort_batch(self):
+        if self._batch_runner: self._batch_runner.abort()
+
+    def _on_progress(self, done, total, msg):
+        self.progress_bar.setMaximum(total); self.progress_bar.setValue(done)
+        self.progress_label.setText(f"[{done} / {total}]  {msg}")
+
+    def _on_finished(self, success, msg):
+        self.btn_run.setVisible(True); self.btn_abort.setVisible(False)
+        self.progress_label.setText(msg)
+        if success: QMessageBox.information(self, "完成", msg)
+        else:       QMessageBox.warning(self, "处理结果", msg)
