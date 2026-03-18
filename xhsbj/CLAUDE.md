@@ -178,6 +178,12 @@ _RED   = "#FA5151"   # 危险色
 - [x] 模式按钮初始绿色样式修复（Python 显式 setStyleSheet，不依赖 CSS :checked）
 - [x] 表格行选中色改为浅绿（直接在 table widget 上设置，避开 scope 隔离）
 - [x] 模板选择按钮填满列宽（QSizePolicy.Expanding）
+- [x] 去除 cv2 依赖，改用 PIL 纯实现（`Image.PERSPECTIVE` + `ImageDraw` + `ImageFilter`）解决 PyInstaller 打包 cv2 bootstrap 递归崩溃
+- [x] Windows 文件选择器黑色背景修复（仅 macOS 使用 `DontUseNativeDialog`，Windows 使用原生对话框）
+- [x] GitHub Actions 自动打包（Windows only，push main 分支触发）
+- [x] `同步到GitHub.command` 一键脚本：本地打包 Mac + push 代码 + 上传 Release（需 `gh` CLI）
+- [x] 软件改名为「融景」
+- [x] 模板存储迁移到系统级持久目录（Mac: `~/Library/Application Support/融景/templates/`，Windows: `%APPDATA%\融景\templates\`），更新 app 不丢数据
 
 ---
 
@@ -191,3 +197,18 @@ _RED   = "#FA5151"   # 危险色
 6. **QPushButton cell widget 列宽**：放入 QTableWidget 的 cell widget 默认不填充列宽，需 `btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)` + `table.setCellWidget(row, col, btn)`。
 7. **DMG 制作**：无需第三方工具，`hdiutil create -volname ... -srcfolder ... -ov -format UDZO -output xxx.dmg` 即可。先用 `xattr -cr app` 移除本机测试的隔离属性，但分发时建议告知用户右键打开流程。
 8. **视频 PTS 根本原因**：libx264 编码器 time_base = 1/fps，`out_frame.pts = frame_i`（整数帧号）恰好对应正确时长。若直接复制输入 pts（time_base ≈ 1/90000），则时长会虚增约 90000/fps 倍，导致 1 分钟视频变 1 小时。
+9. **cv2 在 PyInstaller 中的 bootstrap 递归**：opencv-python 的 `__init__.py` 调用 `importlib.import_module("cv2")` 时在冻结环境中触发递归。已彻底移除 cv2，用 PIL `Image.PERSPECTIVE` + `ImageDraw.polygon` + `ImageFilter.MinFilter/GaussianBlur` 替代，质量相当。
+10. **macOS 26 Tahoe beta 兼容性**：GitHub Actions 用 macOS 14/15 编译的 PyQt6 在 macOS 26 上 PAC 签名校验失败崩溃。解决方案：Mac 版本在本机用 `bash build_app.sh` 打包，Windows 版本用 GitHub Actions 打包。
+11. **模板数据目录**：`main.py` 中 `get_data_dir()` 返回系统级目录，与 app bundle 完全分离。旧版模板在 `xhsbj/templates/`，已手动迁移到新位置。
+
+---
+
+## 发布流程（每次功能更新后）
+
+> **⚠️ 对话结束前必须提醒用户运行同步脚本！**
+
+1. 代码改完、本地 `python3 main.py` 验证正常
+2. 双击 `同步到GitHub.command`（自动完成：本地打包 Mac → push 代码 → 上传 Release）
+3. 等 10-15 分钟后去 [Actions 页面](https://github.com/xiwenran/-/actions) 下载 Windows 包
+
+GitHub Releases Mac 下载地址：https://github.com/xiwenran/-/releases/latest

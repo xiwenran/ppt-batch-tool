@@ -10,7 +10,7 @@
 set -e
 cd "$(dirname "$0")"
 
-APP_NAME="PPT场景合成工具"
+APP_NAME="融景"
 ARCH=$(uname -m)   # arm64 = Apple Silicon, x86_64 = Intel
 
 echo "=========================================="

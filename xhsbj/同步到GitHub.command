@@ -15,7 +15,7 @@ echo ""
 # ── 步骤 2：同步代码到 GitHub（触发 Windows 自动打包）──
 echo "▶ 步骤 2/3  同步代码到 GitHub..."
 cd /Users/xili
-git add .
+git add xhsbj/ .github/ README.md
 MSG="更新 $(date '+%Y-%m-%d %H:%M')"
 git commit -m "$MSG" || echo "（没有新代码变更，跳过提交）"
 git push
@@ -25,7 +25,7 @@ echo ""
 echo "▶ 步骤 3/3  上传 Mac 安装包到 GitHub Releases..."
 cd /Users/xili/xhsbj
 ARCH=$(uname -m)
-DMG="dist/PPT场景合成工具_${ARCH}.dmg"
+DMG="dist/融景_${ARCH}.dmg"
 TAG="v$(date '+%Y%m%d-%H%M')"
 
 gh release create "$TAG" "$DMG" \

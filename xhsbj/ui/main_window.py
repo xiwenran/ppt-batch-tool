@@ -396,7 +396,7 @@ def _btn(text, slot=None, style="", w=None) -> QPushButton:
 class MainWindow(QMainWindow):
     def __init__(self, templates_dir: str):
         super().__init__()
-        self.setWindowTitle("PPT 场景合成工具")
+        self.setWindowTitle("融景")
         self.resize(1340, 840)
         self.setMinimumSize(960, 640)
         self.setStyleSheet(STYLE)
@@ -408,7 +408,7 @@ class MainWindow(QMainWindow):
         self._picked_image_files = []
         # Per-picker last-used directories — persisted across sessions via QSettings
         _home = os.path.expanduser("~")
-        self._settings = QSettings("xhsbj", "PPTComposer")
+        self._settings = QSettings("融景", "RongJing")
         self._last_dir_bg      = self._settings.value("last_dir_bg",      _home)
         self._last_dir_preview = self._settings.value("last_dir_preview",  _home)
         self._last_dir_input   = self._settings.value("last_dir_input",    _home)
@@ -536,6 +536,16 @@ class MainWindow(QMainWindow):
         btn_save = _btn("  保存模板", self._save_template, "primary")
         btn_save.setFixedHeight(44)
         sv.addWidget(btn_save)
+
+        # ── Bottom: uninstall data ─────────────────────────────────────────────
+        sv.addStretch()
+        sv.addWidget(_sep())
+        sv.addSpacing(10)
+        uninstall_btn = QPushButton("清除所有数据（卸载前使用）")
+        uninstall_btn.setObjectName("danger")
+        uninstall_btn.clicked.connect(self._uninstall_data)
+        sv.addWidget(uninstall_btn)
+        sv.addSpacing(4)
 
         root.addWidget(sidebar)
 
@@ -752,6 +762,24 @@ class MainWindow(QMainWindow):
             if self._loaded_tpl_name == name:
                 self._loaded_tpl_name = None
             self._refresh_template_list()
+
+    def _uninstall_data(self):
+        import shutil
+        data_dir = os.path.dirname(self.tm.templates_dir)
+        ret = QMessageBox.warning(
+            self, "清除所有数据",
+            f"将删除所有模板和设置数据：\n{data_dir}\n\n此操作不可恢复，确认继续？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if ret == QMessageBox.StandardButton.Yes:
+            try:
+                self._settings.clear()
+                shutil.rmtree(data_dir, ignore_errors=True)
+                QMessageBox.information(self, "完成", "数据已清除，请重新启动或直接删除 app。")
+                self._refresh_template_list()
+            except Exception as e:
+                QMessageBox.critical(self, "错误", str(e))
 
     def _save_template(self):
         name = self.tpl_name_edit.text().strip()

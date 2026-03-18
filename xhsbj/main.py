@@ -7,17 +7,30 @@ from PyQt6.QtWidgets import QApplication
 from PyQt6.QtGui import QFont
 from ui.main_window import MainWindow
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+APP_NAME = "融景"
+
+
+def get_data_dir() -> str:
+    """返回跨版本持久化的用户数据目录（更新 app 不会丢失数据）。"""
+    if sys.platform == "darwin":
+        return os.path.expanduser(f"~/Library/Application Support/{APP_NAME}")
+    elif sys.platform == "win32":
+        appdata = os.environ.get("APPDATA", os.path.expanduser("~"))
+        return os.path.join(appdata, APP_NAME)
+    else:
+        return os.path.expanduser(f"~/.{APP_NAME}")
 
 
 def main():
     app = QApplication(sys.argv)
-    app.setApplicationName("PPT 场景合成工具")
+    app.setApplicationName(APP_NAME)
     app.setStyle("Fusion")
-    # Use system font (SF Pro on macOS)
     f = app.font(); f.setPointSize(13); app.setFont(f)
 
-    window = MainWindow(templates_dir=os.path.join(BASE_DIR, "templates"))
+    templates_dir = os.path.join(get_data_dir(), "templates")
+    os.makedirs(templates_dir, exist_ok=True)
+
+    window = MainWindow(templates_dir=templates_dir)
     window.show()
     sys.exit(app.exec())
 
