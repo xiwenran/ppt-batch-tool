@@ -3,7 +3,7 @@ import sys
 import subprocess
 
 from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget,
     QPushButton, QLabel, QLineEdit, QListWidget,
     QFileDialog, QMessageBox, QComboBox, QTableWidget, QTableWidgetItem,
     QHeaderView, QProgressBar, QFormLayout, QSpinBox,
@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
     QSizePolicy,
 )
 from PyQt6.QtCore import Qt, QSize, QSettings
-from PyQt6.QtGui import QFont, QColor, QPainter
+from PyQt6.QtGui import QFont, QColor
 
 from models.template_model import Template, TemplateManager
 from core.batch_runner import BatchRunner, VideoRunner, get_image_files
@@ -163,17 +163,8 @@ QListWidget::item {{
 QListWidget::item:selected {{ background: rgba(7,193,96,0.18); color: {_GREEN}; }}
 QListWidget::item:hover:!selected {{ background: #E8E8E8; }}
 
-/* ── Tabs ── */
-QTabWidget         {{ background: {_WIN}; }}
-QTabWidget::pane   {{ border: none; background: {_WIN}; }}
-QTabBar            {{ background: {_CARD}; border-bottom: 1px solid {_SEP}; }}
-QTabBar::tab {{
-    background: {_CARD}; padding: 13px 28px;
-    color: {_TEXT2}; font-size: 13px; font-weight: 500;
-    border-bottom: 2px solid transparent; margin-bottom: -1px;
-}}
-QTabBar::tab:selected {{ color: {_GREEN}; border-bottom-color: {_GREEN}; }}
-QTabBar::tab:hover:!selected {{ color: {_TEXT}; }}
+/* ── Custom nav header (replaces QTabWidget) ── */
+QWidget#navHeader {{ background: {_CARD}; border-bottom: 1px solid {_SEP}; }}
 
 /* ── Table ── */
 QTableWidget {{
@@ -404,31 +395,14 @@ def _btn(text, slot=None, style="", w=None) -> QPushButton:
     return b
 
 
-# ── Tab header filler (fills the empty space right of the last tab on Windows) ─
-
-class TabHeaderFill(QWidget):
-    """Expands to fill the blank area to the right of QTabBar tabs.
-    Uses paintEvent to guarantee the background is drawn on Windows/Fusion."""
-    def __init__(self, bg_color: str, border_color: str, parent=None):
-        super().__init__(parent)
-        self._bg = QColor(bg_color)
-        self._border = QColor(border_color)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.setMinimumWidth(1)
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.fillRect(self.rect(), self._bg)
-        painter.setPen(self._border)
-        painter.drawLine(0, self.height() - 1, self.width(), self.height() - 1)
-
-
 # ── Main window ───────────────────────────────────────────────────────────────
 
 class MainWindow(QMainWindow):
     def __init__(self, templates_dir: str):
         super().__init__()
-        self.setWindowTitle("融景")
+        import datetime
+        _build = datetime.datetime.now().strftime("%m%d-%H%M")
+        self.setWindowTitle(f"融景  b{_build}")
         self.resize(1340, 840)
         self.setMinimumSize(960, 640)
         self.setStyleSheet(STYLE)
@@ -477,38 +451,44 @@ class MainWindow(QMainWindow):
 
         lv = QVBoxLayout(root)
         lv.setContentsMargins(0, 0, 0, 0); lv.setSpacing(0)
-        self.tabs = QTabWidget()
-        self.tabs.setTabPosition(QTabWidget.TabPosition.North)
-        self._fix_bg(self.tabs, _WIN)
-        self._fix_bg(self.tabs.tabBar(), _CARD)
 
-        # TabHeaderFill expands to cover the blank area right of the last tab.
-        # Uses paintEvent self-drawing so Windows/Fusion always renders it correctly.
-        corner = TabHeaderFill(_CARD, _SEP, self.tabs)
-        corner.setMinimumHeight(self.tabs.tabBar().sizeHint().height())
-        self.tabs.setCornerWidget(corner, Qt.Corner.TopRightCorner)
+        # ── Custom nav header (replaces QTabWidget to avoid Windows black filler) ──
+        nav = QWidget(); nav.setObjectName("navHeader")
+        self._fix_bg(nav, _CARD)
+        nh = QHBoxLayout(nav)
+        nh.setContentsMargins(16, 0, 16, 0); nh.setSpacing(0)
 
-        lv.addWidget(self.tabs)
-        self.tabs.addTab(self._build_editor_tab(), "  模板配置  ")
-        self.tabs.addTab(self._build_batch_tab(),  "  批量导出  ")
-        self._update_tab_header_fill()
+        self._nav_btns = []
+        for i, label in enumerate(["模板配置", "批量导出"]):
+            btn = QPushButton(label)
+            btn.setCheckable(True)
+            btn.setFixedHeight(48)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.clicked.connect(lambda checked, idx=i: self._switch_page(idx))
+            self._nav_btns.append(btn)
+            nh.addWidget(btn)
+        nh.addStretch()   # stretch fills remaining header width — no black gap possible
 
-    def _update_tab_header_fill(self):
-        corner = self.tabs.cornerWidget(Qt.Corner.TopRightCorner)
-        bar = self.tabs.tabBar()
-        if not corner or not bar:
-            return
-        fill_w = max(0, self.tabs.width() - bar.geometry().right() - 1)
-        corner.setFixedWidth(fill_w)
-        corner.setFixedHeight(bar.height())
+        lv.addWidget(nav)
 
-    def showEvent(self, event):
-        super().showEvent(event)
-        self._update_tab_header_fill()
+        # ── Page stack ────────────────────────────────────────────────────────
+        self.stack = QStackedWidget()
+        self._fix_bg(self.stack, _WIN)
+        self.stack.addWidget(self._build_editor_tab())
+        self.stack.addWidget(self._build_batch_tab())
+        lv.addWidget(self.stack)
 
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self._update_tab_header_fill()
+        self._switch_page(0)
+
+    # ── Editor tab ────────────────────────────────────────────────────────────
+
+    def _switch_page(self, idx: int):
+        self.stack.setCurrentIndex(idx)
+        active   = f"QPushButton{{background:transparent;color:{_GREEN};font-weight:600;font-size:13px;border:none;border-bottom:2px solid {_GREEN};border-radius:0;padding:0 20px;}}"
+        inactive = f"QPushButton{{background:transparent;color:{_TEXT2};font-size:13px;font-weight:500;border:none;border-bottom:2px solid transparent;border-radius:0;padding:0 20px;}} QPushButton:hover{{color:{_TEXT};}}"
+        for i, btn in enumerate(self._nav_btns):
+            btn.setChecked(i == idx)
+            btn.setStyleSheet(active if i == idx else inactive)
 
     # ── Editor tab ────────────────────────────────────────────────────────────
 
