@@ -217,7 +217,7 @@ _RED   = "#FA5151"   # 危险色
 7. **DMG 制作**：无需第三方工具，`hdiutil create -volname ... -srcfolder ... -ov -format UDZO -output xxx.dmg` 即可。先用 `xattr -cr app` 移除本机测试的隔离属性，但分发时建议告知用户右键打开流程。
 8. **视频 PTS 根本原因**：libx264 编码器 time_base = 1/fps，`out_frame.pts = frame_i`（整数帧号）恰好对应正确时长。若直接复制输入 pts（time_base ≈ 1/90000），则时长会虚增约 90000/fps 倍，导致 1 分钟视频变 1 小时。
 9. **cv2 在 PyInstaller 中的 bootstrap 递归**：opencv-python 的 `__init__.py` 调用 `importlib.import_module("cv2")` 时在冻结环境中触发递归。已彻底移除 cv2，用 PIL `Image.PERSPECTIVE` + `ImageDraw.polygon` + `ImageFilter.MinFilter/GaussianBlur` 替代，质量相当。
-10. **Windows QTabWidget 黑色 tab bar**：`QWidget { background: transparent }` 会导致 Windows 上 tab bar 右侧空白区域渲染为黑色。解决方案：在 `_build_ui()` 里对 `self.tabs` 调用 `QPalette + setAutoFillBackground(True)`，直接设定背景色，绕过 CSS 系统。
+10. **Windows 黑色区域（两处）**：`QWidget { background: transparent }` 在 Windows 上凡是没有显式绘制背景的 widget 都渲染为黑色。需要对 `root`（central widget）和 `self.tabs`（QTabWidget）都调用 `QPalette + setAutoFillBackground(True)` 才能彻底消除。`root` 用 `_WIN`，`self.tabs` 用 `_CARD`。
 11. **侧边栏布局压缩**：侧边栏使用单一 QVBoxLayout 时，在小屏幕（1366×768）上表单内容超出高度，addStretch 收缩为零，模板列表被压到最小高度只显示 1 条。解决方案：将表单内容放入 QScrollArea，「保存/卸载」按钮固定在 QScrollArea 下方（不参与滚动）。
 12. **macOS 26 Tahoe beta 兼容性**：GitHub Actions 用 macOS 14/15 编译的 PyQt6 在 macOS 26 上 PAC 签名校验失败崩溃。解决方案：Mac 版本在本机用 `bash build_app.sh` 打包，Windows 版本用 GitHub Actions 打包。
 11. **模板数据目录**：`main.py` 中 `get_data_dir()` 返回系统级目录，与 app bundle 完全分离。旧版模板在 `xhsbj/templates/`，已手动迁移到新位置。

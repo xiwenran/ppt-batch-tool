@@ -436,16 +436,21 @@ class MainWindow(QMainWindow):
     # ── Root ──────────────────────────────────────────────────────────────────
 
     def _build_ui(self):
+        from PyQt6.QtGui import QPalette, QColor as _QColor
         root = QWidget()
         self.setCentralWidget(root)
+        # Fix Windows: CSS background:transparent on the central widget renders as
+        # black. Use QPalette to guarantee the window background is painted.
+        _pal_root = root.palette()
+        _pal_root.setColor(QPalette.ColorRole.Window, _QColor(_WIN))
+        root.setPalette(_pal_root)
+        root.setAutoFillBackground(True)
+
         lv = QVBoxLayout(root)
         lv.setContentsMargins(0, 0, 0, 0); lv.setSpacing(0)
         self.tabs = QTabWidget()
         self.tabs.setTabPosition(QTabWidget.TabPosition.North)
-        # On Windows, CSS background:transparent renders as black in the tab bar's
-        # empty area to the right of the last tab.  Setting the palette directly
-        # guarantees the background is painted before any stylesheet kicks in.
-        from PyQt6.QtGui import QPalette, QColor as _QColor
+        # Same fix for the tab bar's empty area to the right of the last tab.
         _pal = self.tabs.palette()
         _pal.setColor(QPalette.ColorRole.Window, _QColor(_CARD))
         self.tabs.setPalette(_pal)
