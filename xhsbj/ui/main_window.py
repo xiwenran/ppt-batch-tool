@@ -32,10 +32,24 @@ _RED   = "#FA5151"   # WeChat red
 
 STYLE = f"""
 QMainWindow {{ background: {_WIN}; }}
-QWidget      {{ background: transparent; color: {_TEXT}; font-size: 13px; }}
+QWidget      {{ color: {_TEXT}; font-size: 13px; }}
+
+/* ── Named page/container backgrounds (explicit, not transparent) ── */
+QWidget#root_bg,
+QStackedWidget#pageStack,
+QWidget#editor_page,
+QWidget#batch_outer,
+QWidget#batch_scroll_body,
+QWidget#batch_content,
+QWidget#batch_viewport {{ background: {_WIN}; }}
+
+QWidget#sidebar,
+QWidget#editor_viewport,
+QWidget#editor_form,
+QWidget#editor_bottom {{ background: {_SIDE}; }}
 
 /* ── Containers ── */
-QWidget#sidebar {{ background: {_SIDE}; }}
+QWidget#sidebar {{ background: {_SIDE}; border-right: 1px solid {_SEP}; }}
 QWidget#card    {{
     background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 {_CARD}, stop:1 #F8F8F8);
     border-radius: 16px; border: 1px solid {_SEP};
@@ -400,9 +414,7 @@ def _btn(text, slot=None, style="", w=None) -> QPushButton:
 class MainWindow(QMainWindow):
     def __init__(self, templates_dir: str):
         super().__init__()
-        import datetime
-        _build = datetime.datetime.now().strftime("%m%d-%H%M")
-        self.setWindowTitle(f"融景  b{_build}")
+        self.setWindowTitle("融景")
         self.resize(1340, 840)
         self.setMinimumSize(960, 640)
         self.setStyleSheet(STYLE)
@@ -442,12 +454,19 @@ class MainWindow(QMainWindow):
         widget.setPalette(pal)
         widget.setAutoFillBackground(True)
 
+    @staticmethod
+    def _mark_styled_bg(widget, name: str):
+        """Set objectName so the named CSS rule applies, and force styled background painting."""
+        widget.setObjectName(name)
+        widget.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+
     def _build_ui(self):
         self._fix_bg(self, _WIN)
 
         root = QWidget()
         self.setCentralWidget(root)
         self._fix_bg(root, _WIN)
+        self._mark_styled_bg(root, "root_bg")
 
         lv = QVBoxLayout(root)
         lv.setContentsMargins(0, 0, 0, 0); lv.setSpacing(0)
@@ -474,6 +493,7 @@ class MainWindow(QMainWindow):
         # ── Page stack ────────────────────────────────────────────────────────
         self.stack = QStackedWidget()
         self._fix_bg(self.stack, _WIN)
+        self._mark_styled_bg(self.stack, "pageStack")
         self.stack.addWidget(self._build_editor_tab())
         self.stack.addWidget(self._build_batch_tab())
         lv.addWidget(self.stack)
@@ -495,13 +515,14 @@ class MainWindow(QMainWindow):
     def _build_editor_tab(self):
         tab = QWidget()
         self._fix_bg(tab, _WIN)
+        self._mark_styled_bg(tab, "editor_page")
         root = QHBoxLayout(tab)
         root.setContentsMargins(0, 0, 0, 0); root.setSpacing(0)
 
         # ── Sidebar ───────────────────────────────────────────────────────────
-        sidebar = QWidget(); sidebar.setObjectName("sidebar"); sidebar.setFixedWidth(420)
-        sidebar.setStyleSheet(f"QWidget#sidebar{{background:{_SIDE};border-right:1px solid {_SEP};}}")
+        sidebar = QWidget(); sidebar.setFixedWidth(420)
         self._fix_bg(sidebar, _SIDE)
+        self._mark_styled_bg(sidebar, "sidebar")
         sv = QVBoxLayout(sidebar)
         sv.setContentsMargins(0, 0, 0, 0); sv.setSpacing(0)
 
@@ -512,8 +533,10 @@ class MainWindow(QMainWindow):
         sb_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._fix_bg(sb_scroll, _SIDE)
         self._fix_bg(sb_scroll.viewport(), _SIDE)
+        self._mark_styled_bg(sb_scroll.viewport(), "editor_viewport")
         form = QWidget()
         self._fix_bg(form, _SIDE)
+        self._mark_styled_bg(form, "editor_form")
         fv = QVBoxLayout(form)
         fv.setContentsMargins(14, 16, 14, 16); fv.setSpacing(0)
 
@@ -614,6 +637,7 @@ class MainWindow(QMainWindow):
         # ── Bottom panel: always visible (save + uninstall) ───────────────────
         bottom = QWidget()
         self._fix_bg(bottom, _SIDE)
+        self._mark_styled_bg(bottom, "editor_bottom")
         bv = QVBoxLayout(bottom)
         bv.setContentsMargins(14, 8, 14, 10); bv.setSpacing(0)
 
@@ -648,8 +672,10 @@ class MainWindow(QMainWindow):
         scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setFrameShape(QFrame.Shape.NoFrame)
         self._fix_bg(scroll, _WIN)
         self._fix_bg(scroll.viewport(), _WIN)
+        self._mark_styled_bg(scroll.viewport(), "batch_viewport")
         scroll_body = QWidget()
         self._fix_bg(scroll_body, _WIN)
+        self._mark_styled_bg(scroll_body, "batch_scroll_body")
         scroll.setWidget(scroll_body)
         body_lv = QVBoxLayout(scroll_body)
         body_lv.setContentsMargins(0, 0, 0, 0); body_lv.setSpacing(0)
@@ -657,6 +683,7 @@ class MainWindow(QMainWindow):
         # Centered content area (max 960px)
         content = QWidget(); content.setMaximumWidth(960)
         self._fix_bg(content, _WIN)
+        self._mark_styled_bg(content, "batch_content")
         lv = QVBoxLayout(content)
         lv.setContentsMargins(28, 28, 28, 28); lv.setSpacing(16)
 
@@ -800,6 +827,7 @@ class MainWindow(QMainWindow):
 
         outer = QWidget()
         self._fix_bg(outer, _WIN)
+        self._mark_styled_bg(outer, "batch_outer")
         ol = QVBoxLayout(outer); ol.setContentsMargins(0,0,0,0)
         ol.addWidget(scroll)
         return outer
