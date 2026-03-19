@@ -437,24 +437,36 @@ class MainWindow(QMainWindow):
 
     def _build_ui(self):
         from PyQt6.QtGui import QPalette, QColor as _QColor
+
+        def _fix_bg(widget, color):
+            """Force a widget to paint a solid background via QPalette.
+            On Windows, CSS background:transparent renders as black;
+            setting the palette + autoFillBackground bypasses the stylesheet."""
+            pal = widget.palette()
+            for role in (QPalette.ColorRole.Window,
+                         QPalette.ColorRole.Base,
+                         QPalette.ColorRole.Button):
+                pal.setColor(role, _QColor(color))
+            widget.setPalette(pal)
+            widget.setAutoFillBackground(True)
+
+        # Fix QMainWindow itself so it paints _WIN behind everything
+        _fix_bg(self, _WIN)
+
         root = QWidget()
         self.setCentralWidget(root)
-        # Fix Windows: CSS background:transparent on the central widget renders as
-        # black. Use QPalette to guarantee the window background is painted.
-        _pal_root = root.palette()
-        _pal_root.setColor(QPalette.ColorRole.Window, _QColor(_WIN))
-        root.setPalette(_pal_root)
-        root.setAutoFillBackground(True)
+        _fix_bg(root, _WIN)
 
         lv = QVBoxLayout(root)
         lv.setContentsMargins(0, 0, 0, 0); lv.setSpacing(0)
         self.tabs = QTabWidget()
         self.tabs.setTabPosition(QTabWidget.TabPosition.North)
-        # Same fix for the tab bar's empty area to the right of the last tab.
-        _pal = self.tabs.palette()
-        _pal.setColor(QPalette.ColorRole.Window, _QColor(_CARD))
-        self.tabs.setPalette(_pal)
-        self.tabs.setAutoFillBackground(True)
+        _fix_bg(self.tabs, _CARD)
+
+        # QTabBar is an independent child widget — must be fixed separately.
+        # Without this, the area to the right of the last tab renders black.
+        _fix_bg(self.tabs.tabBar(), _CARD)
+
         lv.addWidget(self.tabs)
         self.tabs.addTab(self._build_editor_tab(), "  模板配置  ")
         self.tabs.addTab(self._build_batch_tab(),  "  批量导出  ")
