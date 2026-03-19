@@ -9,6 +9,11 @@ from ui.main_window import MainWindow
 
 APP_NAME = "融景"
 
+try:
+    from _build_info import BUILD
+except ImportError:
+    BUILD = "dev"
+
 
 def get_data_dir() -> str:
     """返回跨版本持久化的用户数据目录（更新 app 不会丢失数据）。"""
@@ -30,7 +35,7 @@ def main():
     templates_dir = os.path.join(get_data_dir(), "templates")
     os.makedirs(templates_dir, exist_ok=True)
 
-    window = MainWindow(templates_dir=templates_dir)
+    window = MainWindow(templates_dir=templates_dir, build=BUILD)
     window.show()
     sys.exit(app.exec())
 

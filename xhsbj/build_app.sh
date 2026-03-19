@@ -20,6 +20,11 @@ echo "=========================================="
 echo ""
 echo "▶ 步骤 1/3  PyInstaller 打包 .app ..."
 
+# 注入构建标识（git 短 SHA）
+BUILD=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+echo "BUILD = \"${BUILD}\"" > _build_info.py
+echo "  构建标识: $BUILD"
+
 pyinstaller \
   --windowed \
   --name "$APP_NAME" \
@@ -28,6 +33,7 @@ pyinstaller \
   --hidden-import "av" \
   --collect-all "av" \
   --noconfirm \
+  --add-data "_build_info.py:." \
   main.py
 
 echo ""
