@@ -1,9 +1,8 @@
 """PPT → PNG 转换引擎。
 
-支持三种后端（按优先级自动选择，运行时自动降级）：
-  A. WPS COM (仅 Windows，用户已安装 WPS)
-  B. PowerPoint COM (仅 Windows) / PowerPoint AppleScript (仅 macOS)
-  C. LibreOffice headless (跨平台备选)
+支持后端（按优先级自动选择，运行时自动降级）：
+  A. PowerPoint COM (仅 Windows) / PowerPoint AppleScript (仅 macOS)
+  B. LibreOffice headless (跨平台备选)
 """
 
 import os
@@ -38,19 +37,6 @@ class ConvertResult:
 # ---------------------------------------------------------------------------
 # 后端检测
 # ---------------------------------------------------------------------------
-
-def _detect_wps_com() -> bool:
-    """检测 Windows 上是否可用 WPS COM。"""
-    if sys.platform != "win32":
-        return False
-    try:
-        import comtypes.client  # noqa: F401
-        app = comtypes.client.CreateObject("KWPP.Application")
-        app.Quit()
-        return True
-    except Exception:
-        return False
-
 
 def _detect_powerpoint_com() -> bool:
     """检测 Windows 上是否可用 PowerPoint COM。"""
@@ -97,7 +83,6 @@ def _find_libreoffice() -> Optional[str]:
 # 后端枚举
 # ---------------------------------------------------------------------------
 
-BACKEND_WPS_COM = "wps_com"
 BACKEND_PPT_COM = "ppt_com"
 BACKEND_PPT_MAC = "ppt_mac"
 BACKEND_LIBREOFFICE = "libreoffice"
@@ -107,8 +92,6 @@ def detect_backends() -> List[str]:
     """返回当前系统可用的后端列表（按优先级排序）。"""
     available = []
     if sys.platform == "win32":
-        if _detect_wps_com():
-            available.append(BACKEND_WPS_COM)
         if _detect_powerpoint_com():
             available.append(BACKEND_PPT_COM)
     elif sys.platform == "darwin":
@@ -121,7 +104,6 @@ def detect_backends() -> List[str]:
 
 def backend_display_name(backend: str) -> str:
     return {
-        BACKEND_WPS_COM: "WPS (COM)",
         BACKEND_PPT_COM: "PowerPoint (COM)",
         BACKEND_PPT_MAC: "PowerPoint (AppleScript)",
         BACKEND_LIBREOFFICE: "LibreOffice",
@@ -131,88 +113,6 @@ def backend_display_name(backend: str) -> str:
 # ---------------------------------------------------------------------------
 # 转换实现
 # ---------------------------------------------------------------------------
-
-def _convert_wps_com(filepath: str, out_dir: str, max_slides: int,
-                     log: Optional[Callable] = None) -> int:
-    """使用 WPS COM 导出幻灯片为 PNG（PDF 中转方案）。返回导出页数。"""
-    import comtypes.client
-
-    abs_path = os.path.abspath(filepath).replace("/", "\\")
-    if log:
-        log(f"    [WPS] 正在创建 WPS 实例...")
-    wpp = comtypes.client.CreateObject("KWPP.Application")
-    wpp.Visible = False
-    try:
-        if log:
-            log(f"    [WPS] 正在打开文件: {os.path.basename(filepath)}")
-        pres = wpp.Presentations.Open(abs_path)
-        try:
-            # 在输出目录旁创建临时 PDF（避免系统临时目录权限问题）
-            pdf_dir = os.path.join(os.path.dirname(out_dir), ".ppt2img_tmp")
-            os.makedirs(pdf_dir, exist_ok=True)
-            pdf_path = os.path.join(pdf_dir, "output.pdf").replace("/", "\\")
-            try:
-                exported = False
-                # 方法1: ExportAsFixedFormat
-                if not exported:
-                    try:
-                        if log:
-                            log(f"    [WPS] 尝试 ExportAsFixedFormat...")
-                        pres.ExportAsFixedFormat(pdf_path, 2)
-                        exported = True
-                        if log:
-                            log(f"    [WPS] ExportAsFixedFormat 成功")
-                    except Exception as e:
-                        if log:
-                            log(f"    [WPS] ExportAsFixedFormat 失败: {e}")
-                # 方法2: SaveAs PDF
-                if not exported:
-                    try:
-                        if log:
-                            log(f"    [WPS] 尝试 SaveAs(PDF)...")
-                        pres.SaveAs(pdf_path, 32)
-                        exported = True
-                        if log:
-                            log(f"    [WPS] SaveAs(PDF) 成功")
-                    except Exception as e:
-                        if log:
-                            log(f"    [WPS] SaveAs(PDF) 失败: {e}")
-                # 方法3: ExportPDF
-                if not exported:
-                    try:
-                        if log:
-                            log(f"    [WPS] 尝试 ExportPDF...")
-                        pres.ExportPDF(pdf_path)
-                        exported = True
-                        if log:
-                            log(f"    [WPS] ExportPDF 成功")
-                    except Exception as e:
-                        if log:
-                            log(f"    [WPS] ExportPDF 失败: {e}")
-                if not exported:
-                    raise RuntimeError(
-                        "WPS 已检测到，但无法导出此 PPT 为 PDF。"
-                        "建议：1) 更新 WPS 到最新版本；2) 切换为 PowerPoint 或 LibreOffice。"
-                    )
-                pres.Close()
-                if log:
-                    log(f"    [WPS] 正在渲染 PNG...")
-                return _pdf_to_png(pdf_path, out_dir, max_slides)
-            finally:
-                # 清理临时 PDF
-                shutil.rmtree(pdf_dir, ignore_errors=True)
-        except Exception:
-            try:
-                pres.Close()
-            except Exception:
-                pass
-            raise
-    finally:
-        try:
-            wpp.Quit()
-        except Exception:
-            pass
-
 
 def _convert_ppt_com(filepath: str, out_dir: str, max_slides: int,
                      log: Optional[Callable] = None) -> int:
@@ -385,9 +285,7 @@ def convert_one_with_fallback(filepath: str, out_dir: str, max_slides: int,
     last_error = None
     for backend in backends:
         try:
-            if backend == BACKEND_WPS_COM:
-                pages = _convert_wps_com(filepath, out_dir, max_slides, log)
-            elif backend == BACKEND_PPT_COM:
+            if backend == BACKEND_PPT_COM:
                 pages = _convert_ppt_com(filepath, out_dir, max_slides, log)
             elif backend == BACKEND_LIBREOFFICE:
                 pages = _convert_libreoffice(filepath, out_dir, max_slides,

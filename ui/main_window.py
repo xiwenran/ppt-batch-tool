@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
 
 from core.converter import (
     ConvertResult, ConvertWorker, detect_backends, backend_display_name,
-    BACKEND_LIBREOFFICE, BACKEND_WPS_COM, BACKEND_PPT_COM,
+    BACKEND_LIBREOFFICE, BACKEND_PPT_COM,
     BACKEND_PPT_MAC, _find_libreoffice,
 )
 from core.scanner import scan_ppt_files
@@ -449,8 +449,8 @@ class MainWindow(QMainWindow):
                 )
             else:
                 self._engine_hint.setText(
-                    "未检测到 WPS、PowerPoint 或 LibreOffice。\n"
-                    "请安装 WPS Office、Microsoft Office 或从 libreoffice.org 下载安装免费的 LibreOffice。"
+                    "未检测到 PowerPoint 或 LibreOffice。\n"
+                    "请安装 Microsoft Office 或从 libreoffice.org 下载安装免费的 LibreOffice。"
                 )
             self._lo_row.show()
             saved = self._settings.value("soffice_path", "")
