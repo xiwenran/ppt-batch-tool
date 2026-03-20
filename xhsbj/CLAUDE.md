@@ -230,6 +230,6 @@ _RED   = "#FA5151"   # 危险色
 
 1. 代码改完、本地 `python3 main.py` 验证正常
 2. 双击 `同步到GitHub.command`（自动完成：本地打包 Mac → push 代码 → 上传 Release）
-3. 等 10-15 分钟后去 [Actions 页面](https://github.com/xiwenran/-/actions) 下载 Windows 包
+3. 等 10-15 分钟后去 [Actions 页面](https://github.com/xiwenran/rongjing/actions) 下载 Windows 包
 
-GitHub Releases Mac 下载地址：https://github.com/xiwenran/-/releases/latest
+GitHub Releases Mac 下载地址：https://github.com/xiwenran/rongjing/releases/latest

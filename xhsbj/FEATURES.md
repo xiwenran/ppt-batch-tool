@@ -220,7 +220,7 @@
   3. Push 代码触发 Windows Actions 打包，Windows ZIP 约 10-15 分钟后自动附加到同一 Release
 
 ### 12.4 下载地址
-- [x] Mac + Windows 统一在 Releases 页面下载：`https://github.com/xiwenran/-/releases/latest`
+- [x] Mac + Windows 统一在 Releases 页面下载：`https://github.com/xiwenran/rongjing/releases/latest`
 
 ---
 

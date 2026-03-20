@@ -24,13 +24,13 @@ DMG="dist/融景_${ARCH}.dmg"
 TAG="v$(date '+%Y%m%d-%H%M')"
 
 # 清理同名 draft（上次脚本中途失败时可能留下）
-if gh release view "$TAG" --repo xiwenran/- &>/dev/null; then
+if gh release view "$TAG" --repo xiwenran/rongjing &>/dev/null; then
   echo "  ⚠️  同名 Release 已存在，删除后重建..."
-  gh release delete "$TAG" --repo xiwenran/- --yes --cleanup-tag
+  gh release delete "$TAG" --repo xiwenran/rongjing --yes --cleanup-tag
 fi
 
 gh release create "$TAG" "$DMG" \
-  --repo xiwenran/- \
+  --repo xiwenran/rongjing \
   --title "版本 $TAG" \
   --notes "Mac (${ARCH}) 安装包已附于本 Release。Windows 版本由 GitHub Actions 自动打包，约 10-15 分钟后自动附加到本 Release，刷新页面即可下载。"
 echo ""
@@ -51,7 +51,7 @@ echo "=========================================="
 echo "  ✅ 全部完成！"
 echo ""
 echo "  Mac 下载链接："
-echo "  https://github.com/xiwenran/-/releases/latest"
+echo "  https://github.com/xiwenran/rongjing/releases/latest"
 echo ""
 echo "  Windows 包将在 10-15 分钟后自动附加到同一 Release 页面"
 echo "  刷新上方链接即可看到 Windows 下载"

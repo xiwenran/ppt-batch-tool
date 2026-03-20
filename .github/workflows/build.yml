@@ -68,11 +68,11 @@ jobs:
           }
           # 兜底：查找最新 Release
           if (-not $tag) {
-            $tag = gh release list --repo xiwenran/- --limit 1 --json tagName --jq '.[0].tagName' 2>$null
+            $tag = gh release list --repo xiwenran/rongjing --limit 1 --json tagName --jq '.[0].tagName' 2>$null
             Write-Host "从 gh release list 读取 tag: $tag"
           }
           if ($tag) {
-            gh release upload $tag "dist\融景_windows_x64.zip" --repo xiwenran/- --clobber
+            gh release upload $tag "dist\融景_windows_x64.zip" --repo xiwenran/rongjing --clobber
             Write-Host "已附加到 Release $tag"
           } else {
             Write-Host "未找到 Release，跳过（可在 Actions 页面手动下载 Artifact）"
