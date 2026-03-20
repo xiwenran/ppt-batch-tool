@@ -132,46 +132,62 @@ def backend_display_name(backend: str) -> str:
 # ---------------------------------------------------------------------------
 
 def _convert_wps_com(filepath: str, out_dir: str, max_slides: int) -> int:
-    """使用 WPS COM 导出幻灯片为 PNG。返回导出页数。"""
+    """使用 WPS COM 导出幻灯片为 PNG（PDF 中转方案）。返回导出页数。"""
     import comtypes.client
+
+    abs_path = os.path.abspath(filepath)
     wpp = comtypes.client.CreateObject("KWPP.Application")
     wpp.Visible = False
     try:
-        pres = wpp.Presentations.Open(os.path.abspath(filepath), WithWindow=False)
+        pres = wpp.Presentations.Open(abs_path, ReadOnly=True, WithWindow=False)
         try:
-            total = pres.Slides.Count
-            n = min(total, max_slides)
-            for i in range(1, n + 1):
-                slide = pres.Slides.Item(i)
-                out_path = os.path.join(out_dir, f"{i}.png")
-                slide.Export(out_path, "PNG", 1920, 1080)
-            return n
-        finally:
-            pres.Close()
+            # 先导出为 PDF（比逐页 Export 更稳定）
+            with tempfile.TemporaryDirectory(prefix="ppt2img_wps_") as tmpdir:
+                pdf_path = os.path.join(tmpdir, "output.pdf")
+                # ppSaveAsPDF = 32
+                pres.SaveAs(pdf_path, 32)
+                pres.Close()
+                # 用 PyMuPDF 将 PDF 渲染为 PNG
+                return _pdf_to_png(pdf_path, out_dir, max_slides)
+        except Exception:
+            try:
+                pres.Close()
+            except Exception:
+                pass
+            raise
     finally:
-        wpp.Quit()
+        try:
+            wpp.Quit()
+        except Exception:
+            pass
 
 
 def _convert_ppt_com(filepath: str, out_dir: str, max_slides: int) -> int:
-    """使用 PowerPoint COM 导出幻灯片为 PNG。返回导出页数。"""
+    """使用 PowerPoint COM 导出幻灯片为 PNG（PDF 中转方案）。返回导出页数。"""
     import comtypes.client
+
+    abs_path = os.path.abspath(filepath)
     ppt = comtypes.client.CreateObject("PowerPoint.Application")
     try:
-        pres = ppt.Presentations.Open(
-            os.path.abspath(filepath), ReadOnly=True, WithWindow=False
-        )
+        pres = ppt.Presentations.Open(abs_path, ReadOnly=True, WithWindow=False)
         try:
-            total = pres.Slides.Count
-            n = min(total, max_slides)
-            for i in range(1, n + 1):
-                slide = pres.Slides.Item(i)
-                out_path = os.path.join(out_dir, f"{i}.png")
-                slide.Export(out_path, "PNG", 1920, 1080)
-            return n
-        finally:
-            pres.Close()
+            with tempfile.TemporaryDirectory(prefix="ppt2img_ppt_") as tmpdir:
+                pdf_path = os.path.join(tmpdir, "output.pdf")
+                # ppFixedFormatTypePDF = 2
+                pres.ExportAsFixedFormat(pdf_path, 2)
+                pres.Close()
+                return _pdf_to_png(pdf_path, out_dir, max_slides)
+        except Exception:
+            try:
+                pres.Close()
+            except Exception:
+                pass
+            raise
     finally:
-        ppt.Quit()
+        try:
+            ppt.Quit()
+        except Exception:
+            pass
 
 
 def _ppt_mac_batch_export_pdf(ppt_files: List[str], pdf_dir: str) -> dict:
