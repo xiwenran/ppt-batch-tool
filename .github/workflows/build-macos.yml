@@ -1,0 +1,91 @@
+name: 自动打包 macOS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    strategy:
+      matrix:
+        include:
+          - runner: macos-13
+            arch: x86_64
+          - runner: macos-14
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 配置 Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: 安装依赖
+        run: pip install PyQt6 PyMuPDF pyinstaller
+
+      - name: 注入构建标识
+        run: |
+          SHA=$(git rev-parse --short HEAD)
+          echo "BUILD = \"${SHA}\"" > _build_info.py
+          echo "构建标识: $SHA"
+
+      - name: PyInstaller 打包 .app
+        run: |
+          pyinstaller \
+            --windowed \
+            --name "PPT转图片" \
+            --noconfirm \
+            --add-data "_build_info.py:." \
+            main.py
+
+      - name: 打包为 DMG
+        run: |
+          APP_NAME="PPT转图片"
+          DMG_NAME="${APP_NAME}_macos_${{ matrix.arch }}.dmg"
+          DMG_TMP="dist/dmg_tmp"
+
+          mkdir -p "$DMG_TMP"
+          cp -r "dist/$APP_NAME.app" "$DMG_TMP/"
+
+          hdiutil create \
+            -volname "$APP_NAME" \
+            -srcfolder "$DMG_TMP" \
+            -ov \
+            -format UDZO \
+            "dist/$DMG_NAME"
+
+          rm -rf "$DMG_TMP"
+          echo "DMG_NAME=$DMG_NAME" >> $GITHUB_ENV
+
+      - name: 上传到 GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG=""
+          if [ -f RELEASE_TAG ]; then
+            TAG=$(cat RELEASE_TAG | tr -d '[:space:]')
+            echo "从 RELEASE_TAG 读取 tag: $TAG"
+          fi
+          if [ -z "$TAG" ]; then
+            TAG=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1 --json tagName --jq '.[0].tagName' 2>/dev/null || true)
+            echo "从 gh release list 读取 tag: $TAG"
+          fi
+          if [ -n "$TAG" ]; then
+            gh release upload "$TAG" "dist/$DMG_NAME" --repo "$GITHUB_REPOSITORY" --clobber
+            echo "已附加到 Release $TAG"
+          else
+            echo "未找到 Release，跳过上传"
+          fi
+
+      - name: 保留 Artifact 备份
+        uses: actions/upload-artifact@v4
+        with:
+          name: PPT转图片_macos_${{ matrix.arch }}
+          path: dist/${{ env.DMG_NAME }}
