@@ -174,43 +174,58 @@ def _convert_ppt_com(filepath: str, out_dir: str, max_slides: int) -> int:
         ppt.Quit()
 
 
-def _convert_ppt_mac(filepath: str, out_dir: str, max_slides: int) -> int:
-    """使用 macOS PowerPoint 导出 PDF，再用 PyMuPDF 渲染为 PNG。返回导出页数。"""
-    import fitz  # PyMuPDF
+def _ppt_mac_batch_export_pdf(ppt_files: List[str], pdf_dir: str) -> dict:
+    """用一次 AppleScript 调用批量将所有 PPT 导出为 PDF。
 
-    abs_path = os.path.abspath(filepath)
+    PowerPoint 只启动/授权一次，大幅减少权限弹窗。
+    返回 {ppt绝对路径: pdf绝对路径} 映射，失败的文件不在字典中。
+    """
+    os.makedirs(pdf_dir, exist_ok=True)
+    # 构建 AppleScript：打开每个文件 → 导出 PDF → 关闭演示文稿
+    file_commands = []
+    path_map = {}  # ppt_path → pdf_path
+    for i, ppt_path in enumerate(ppt_files):
+        abs_path = os.path.abspath(ppt_path)
+        pdf_path = os.path.join(pdf_dir, f"{i}.pdf")
+        path_map[abs_path] = pdf_path
+        # 每个文件用 try 包裹，单个失败不中断整体
+        file_commands.append(f'''
+        try
+            open POSIX file "{abs_path}"
+            save active presentation in POSIX file "{pdf_path}" as save as PDF
+            close active presentation saving no
+        end try''')
 
-    with tempfile.TemporaryDirectory(prefix="ppt2img_") as tmpdir:
-        pdf_path = os.path.join(tmpdir, "output.pdf")
-        # PowerPoint AppleScript 导出 PDF
-        script = f'''
+    script = f'''
 tell application "Microsoft PowerPoint"
-    open POSIX file "{abs_path}"
-    save active presentation in POSIX file "{pdf_path}" as save as PDF
-    close active presentation saving no
+    {"".join(file_commands)}
 end tell
 '''
-        r = subprocess.run(
-            ["osascript", "-e", script],
-            capture_output=True, text=True, timeout=300,
-        )
-        if r.returncode != 0:
-            raise RuntimeError(f"PowerPoint 导出失败: {r.stderr.strip()}")
-        if not os.path.isfile(pdf_path):
-            raise RuntimeError("PowerPoint 导出 PDF 失败：文件未生成")
+    subprocess.run(
+        ["osascript", "-e", script],
+        capture_output=True, text=True,
+        timeout=len(ppt_files) * 120 + 60,
+    )
+    # 只返回实际生成了 PDF 的映射
+    return {k: v for k, v in path_map.items() if os.path.isfile(v)}
 
-        # PyMuPDF 渲染 PDF 每页为 PNG
-        doc = fitz.open(pdf_path)
-        try:
-            total = len(doc)
-            n = min(total, max_slides)
-            for i in range(n):
-                page = doc[i]
-                pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2))
-                pixmap.save(os.path.join(out_dir, f"{i + 1}.png"))
-            return n
-        finally:
-            doc.close()
+
+def _pdf_to_png(pdf_path: str, out_dir: str, max_slides: int) -> int:
+    """用 PyMuPDF 将 PDF 每页渲染为 PNG。返回导出页数。"""
+    import fitz  # PyMuPDF
+
+    os.makedirs(out_dir, exist_ok=True)
+    doc = fitz.open(pdf_path)
+    try:
+        total = len(doc)
+        n = min(total, max_slides)
+        for i in range(n):
+            page = doc[i]
+            pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+            pixmap.save(os.path.join(out_dir, f"{i + 1}.png"))
+        return n
+    finally:
+        doc.close()
 
 
 def _convert_libreoffice(filepath: str, out_dir: str, max_slides: int,
@@ -266,15 +281,19 @@ def _convert_libreoffice(filepath: str, out_dir: str, max_slides: int,
 # ---------------------------------------------------------------------------
 
 def convert_one(filepath: str, out_dir: str, max_slides: int,
-                backend: str, soffice_path: Optional[str] = None) -> int:
-    """使用指定后端转换一个 PPT 文件。返回导出页数。"""
+                backend: str, soffice_path: Optional[str] = None,
+                pdf_path: Optional[str] = None) -> int:
+    """使用指定后端转换一个 PPT 文件。返回导出页数。
+
+    如果 pdf_path 已提供（macOS 批量模式预导出的 PDF），直接渲染 PNG。
+    """
     os.makedirs(out_dir, exist_ok=True)
+    if pdf_path:
+        return _pdf_to_png(pdf_path, out_dir, max_slides)
     if backend == BACKEND_WPS_COM:
         return _convert_wps_com(filepath, out_dir, max_slides)
     elif backend == BACKEND_PPT_COM:
         return _convert_ppt_com(filepath, out_dir, max_slides)
-    elif backend == BACKEND_PPT_MAC:
-        return _convert_ppt_mac(filepath, out_dir, max_slides)
     elif backend == BACKEND_LIBREOFFICE:
         return _convert_libreoffice(filepath, out_dir, max_slides, soffice_path)
     else:
@@ -327,32 +346,63 @@ class ConvertWorker(QThread):
         results: List[ConvertResult] = []
         total = len(self.ppt_files)
 
-        for idx, filepath in enumerate(self.ppt_files):
-            if self._abort:
-                self.log.emit("已取消转换")
-                break
-
-            basename = os.path.splitext(os.path.basename(filepath))[0]
-            cleaned = clean_filename(basename)
-            self.progress.emit(idx, total, os.path.basename(filepath))
-            self.log.emit(f"[{idx + 1}/{total}] 正在转换: {os.path.basename(filepath)}")
-
-            result = ConvertResult(filepath=filepath, name=os.path.basename(filepath))
+        # macOS PowerPoint 批量模式：一次 AppleScript 导出所有 PDF，只授权一次
+        pdf_map: dict = {}
+        tmp_pdf_dir: Optional[str] = None
+        if self.backend == BACKEND_PPT_MAC:
+            self.log.emit("正在通过 PowerPoint 批量导出 PDF（仅需授权一次）...")
+            self.progress.emit(0, total, "批量导出 PDF 中...")
+            tmp_pdf_dir = tempfile.mkdtemp(prefix="ppt2img_pdf_")
             try:
-                out_dir = _unique_dir(os.path.join(self.output_dir, cleaned))
-                pages = convert_one(
-                    filepath, out_dir, self.max_slides,
-                    self.backend, self.soffice_path,
-                )
-                result.success = True
-                result.pages_exported = pages
-                result.output_dir = out_dir
-                self.log.emit(f"  -> 成功，导出 {pages} 页到 {os.path.basename(out_dir)}/")
+                pdf_map = _ppt_mac_batch_export_pdf(self.ppt_files, tmp_pdf_dir)
             except Exception as e:
-                result.error = str(e)
-                self.log.emit(f"  -> 失败: {e}")
+                self.log.emit(f"PowerPoint 批量导出失败: {e}")
+            self.log.emit(f"PDF 导出完成：{len(pdf_map)}/{total} 个成功")
 
-            results.append(result)
+        try:
+            for idx, filepath in enumerate(self.ppt_files):
+                if self._abort:
+                    self.log.emit("已取消转换")
+                    break
+
+                basename = os.path.splitext(os.path.basename(filepath))[0]
+                cleaned = clean_filename(basename)
+                self.progress.emit(idx, total, os.path.basename(filepath))
+                self.log.emit(f"[{idx + 1}/{total}] 正在处理: {os.path.basename(filepath)}")
+
+                result = ConvertResult(filepath=filepath, name=os.path.basename(filepath))
+                abs_path = os.path.abspath(filepath)
+                try:
+                    out_dir = _unique_dir(os.path.join(self.output_dir, cleaned))
+
+                    if self.backend == BACKEND_PPT_MAC:
+                        # 使用预导出的 PDF
+                        pdf_path = pdf_map.get(abs_path)
+                        if not pdf_path:
+                            raise RuntimeError("PowerPoint 导出 PDF 失败")
+                        pages = convert_one(
+                            filepath, out_dir, self.max_slides,
+                            self.backend, pdf_path=pdf_path,
+                        )
+                    else:
+                        pages = convert_one(
+                            filepath, out_dir, self.max_slides,
+                            self.backend, self.soffice_path,
+                        )
+
+                    result.success = True
+                    result.pages_exported = pages
+                    result.output_dir = out_dir
+                    self.log.emit(f"  -> 成功，导出 {pages} 页到 {os.path.basename(out_dir)}/")
+                except Exception as e:
+                    result.error = str(e)
+                    self.log.emit(f"  -> 失败: {e}")
+
+                results.append(result)
+        finally:
+            # 清理临时 PDF 目录
+            if tmp_pdf_dir:
+                shutil.rmtree(tmp_pdf_dir, ignore_errors=True)
 
         self.progress.emit(total, total, "完成")
         self.finished_all.emit(results)
