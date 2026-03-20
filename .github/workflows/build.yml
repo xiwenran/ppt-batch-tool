@@ -6,14 +6,11 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write   # 允许上传到 GitHub Releases
+  contents: write
 
 jobs:
   build-windows:
     runs-on: windows-latest
-    defaults:
-      run:
-        working-directory: xhsbj
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -24,11 +21,7 @@ jobs:
           python-version: '3.13'
 
       - name: 安装依赖
-        run: pip install PyQt6 Pillow numpy av pyinstaller
-
-      - name: 确保 templates 目录存在
-        run: New-Item -ItemType Directory -Force -Path templates
-        shell: pwsh
+        run: pip install PyQt6 PyMuPDF comtypes pyinstaller
 
       - name: 注入构建标识
         run: |
@@ -41,46 +34,40 @@ jobs:
         run: |
           pyinstaller `
             --windowed `
-            --name "融景" `
-            --add-data "templates;templates" `
+            --name "PPT转图片" `
             --add-data "_build_info.py;." `
-            --hidden-import "PIL._tkinter_finder" `
-            --hidden-import "av" `
-            --collect-all "av" `
             --noconfirm `
             main.py
         shell: pwsh
 
       - name: 压缩为 ZIP
-        run: Compress-Archive -Path "dist\融景" -DestinationPath "dist\融景_windows_x64.zip"
+        run: Compress-Archive -Path "dist\PPT转图片" -DestinationPath "dist\PPT转图片_windows_x64.zip"
         shell: pwsh
 
       - name: 上传到 GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # 优先读取同步脚本提交的 RELEASE_TAG 文件，精确定位 Release
           $tag = $null
-          $tagFile = "..\RELEASE_TAG"
+          $tagFile = "RELEASE_TAG"
           if (Test-Path $tagFile) {
             $tag = (Get-Content $tagFile -Raw).Trim()
-            Write-Host "从 RELEASE_TAG 文件读取 tag: $tag"
+            Write-Host "从 RELEASE_TAG 读取 tag: $tag"
           }
-          # 兜底：查找最新 Release
           if (-not $tag) {
-            $tag = gh release list --repo xiwenran/rongjing --limit 1 --json tagName --jq '.[0].tagName' 2>$null
+            $tag = gh release list --repo $env:GITHUB_REPOSITORY --limit 1 --json tagName --jq '.[0].tagName' 2>$null
             Write-Host "从 gh release list 读取 tag: $tag"
           }
           if ($tag) {
-            gh release upload $tag "dist\融景_windows_x64.zip" --repo xiwenran/rongjing --clobber
+            gh release upload $tag "dist\PPT转图片_windows_x64.zip" --repo $env:GITHUB_REPOSITORY --clobber
             Write-Host "已附加到 Release $tag"
           } else {
-            Write-Host "未找到 Release，跳过（可在 Actions 页面手动下载 Artifact）"
+            Write-Host "未找到 Release，跳过上传"
           }
         shell: pwsh
 
       - name: 保留 Artifact 备份
         uses: actions/upload-artifact@v4
         with:
-          name: 融景_windows_x64
-          path: xhsbj/dist/融景_windows_x64.zip
+          name: PPT转图片_windows_x64
+          path: dist/PPT转图片_windows_x64.zip
