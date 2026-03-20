@@ -68,21 +68,7 @@ def _detect_powerpoint_mac() -> bool:
     """检测 macOS 上是否安装了 Microsoft PowerPoint。"""
     if sys.platform != "darwin":
         return False
-    try:
-        r = subprocess.run(
-            ["osascript", "-e",
-             'tell application "System Events" to (name of processes) contains "Microsoft PowerPoint"'],
-            capture_output=True, text=True, timeout=5,
-        )
-        # 即使 PowerPoint 没运行，只要安装了就能用
-        # 检查应用是否存在
-        r2 = subprocess.run(
-            ["mdfind", "kMDItemCFBundleIdentifier == 'com.microsoft.Powerpoint'"],
-            capture_output=True, text=True, timeout=10,
-        )
-        return bool(r2.stdout.strip())
-    except Exception:
-        return False
+    return os.path.isdir("/Applications/Microsoft PowerPoint.app")
 
 
 def _find_libreoffice() -> Optional[str]:
@@ -189,34 +175,42 @@ def _convert_ppt_com(filepath: str, out_dir: str, max_slides: int) -> int:
 
 
 def _convert_ppt_mac(filepath: str, out_dir: str, max_slides: int) -> int:
-    """使用 macOS PowerPoint AppleScript 导出幻灯片为 PNG。返回导出页数。"""
+    """使用 macOS PowerPoint 导出 PDF，再用 PyMuPDF 渲染为 PNG。返回导出页数。"""
+    import fitz  # PyMuPDF
+
     abs_path = os.path.abspath(filepath)
-    # AppleScript 需要 POSIX 路径
-    script = f'''
-    tell application "Microsoft PowerPoint"
-        open POSIX file "{abs_path}"
-        set pres to active presentation
-        set slideCount to count of slides of pres
-        set maxN to {max_slides}
-        if slideCount < maxN then
-            set maxN to slideCount
-        end if
-        repeat with i from 1 to maxN
-            set outPath to POSIX path of "{out_dir}/" & i & ".png"
-            save slide i of pres in outPath as save as PNG
-        end repeat
-        close pres saving no
-    end tell
-    '''
-    r = subprocess.run(
-        ["osascript", "-e", script],
-        capture_output=True, text=True, timeout=300,
-    )
-    if r.returncode != 0:
-        raise RuntimeError(f"AppleScript 错误: {r.stderr.strip()}")
-    # 计算实际导出了多少页
-    exported = len([f for f in os.listdir(out_dir) if f.endswith(".png")])
-    return exported
+
+    with tempfile.TemporaryDirectory(prefix="ppt2img_") as tmpdir:
+        pdf_path = os.path.join(tmpdir, "output.pdf")
+        # PowerPoint AppleScript 导出 PDF
+        script = f'''
+tell application "Microsoft PowerPoint"
+    open POSIX file "{abs_path}"
+    save active presentation in POSIX file "{pdf_path}" as save as PDF
+    close active presentation saving no
+end tell
+'''
+        r = subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True, text=True, timeout=300,
+        )
+        if r.returncode != 0:
+            raise RuntimeError(f"PowerPoint 导出失败: {r.stderr.strip()}")
+        if not os.path.isfile(pdf_path):
+            raise RuntimeError("PowerPoint 导出 PDF 失败：文件未生成")
+
+        # PyMuPDF 渲染 PDF 每页为 PNG
+        doc = fitz.open(pdf_path)
+        try:
+            total = len(doc)
+            n = min(total, max_slides)
+            for i in range(n):
+                page = doc[i]
+                pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+                pixmap.save(os.path.join(out_dir, f"{i + 1}.png"))
+            return n
+        finally:
+            doc.close()
 
 
 def _convert_libreoffice(filepath: str, out_dir: str, max_slides: int,
