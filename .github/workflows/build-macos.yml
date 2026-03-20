@@ -34,6 +34,7 @@ jobs:
           pyinstaller \
             --windowed \
             --name "PPT转图片" \
+            --osx-bundle-identifier "com.ppt-batch-tool.app" \
             --noconfirm \
             --add-data "_build_info.py:." \
             main.py
