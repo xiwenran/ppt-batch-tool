@@ -135,19 +135,41 @@ def _convert_wps_com(filepath: str, out_dir: str, max_slides: int) -> int:
     """使用 WPS COM 导出幻灯片为 PNG（PDF 中转方案）。返回导出页数。"""
     import comtypes.client
 
-    abs_path = os.path.abspath(filepath)
+    abs_path = os.path.abspath(filepath).replace("/", "\\")
     wpp = comtypes.client.CreateObject("KWPP.Application")
     wpp.Visible = False
     try:
-        pres = wpp.Presentations.Open(abs_path, ReadOnly=True, WithWindow=False)
+        # WPS 的 Open 方法：只传路径，不用关键字参数（兼容性更好）
+        pres = wpp.Presentations.Open(abs_path)
         try:
-            # 先导出为 PDF（比逐页 Export 更稳定）
             with tempfile.TemporaryDirectory(prefix="ppt2img_wps_") as tmpdir:
-                pdf_path = os.path.join(tmpdir, "output.pdf")
-                # ppSaveAsPDF = 32
-                pres.SaveAs(pdf_path, 32)
+                pdf_path = os.path.join(tmpdir, "output.pdf").replace("/", "\\")
+                # 方法1: 尝试 ExportAsFixedFormat (WPS 新版支持)
+                exported = False
+                try:
+                    # ppFixedFormatTypePDF = 2 (与 PowerPoint 一致)
+                    pres.ExportAsFixedFormat(pdf_path, 2)
+                    exported = True
+                except Exception:
+                    pass
+                # 方法2: 尝试 SaveAs PDF
+                if not exported:
+                    try:
+                        # ppSaveAsPDF = 32
+                        pres.SaveAs(pdf_path, 32)
+                        exported = True
+                    except Exception:
+                        pass
+                # 方法3: 使用 WPS 的 ExportPDF 方法
+                if not exported:
+                    try:
+                        pres.ExportPDF(pdf_path)
+                        exported = True
+                    except Exception:
+                        pass
+                if not exported:
+                    raise RuntimeError("WPS 导出 PDF 失败，请尝试更新 WPS 到最新版本")
                 pres.Close()
-                # 用 PyMuPDF 将 PDF 渲染为 PNG
                 return _pdf_to_png(pdf_path, out_dir, max_slides)
         except Exception:
             try:
@@ -166,13 +188,14 @@ def _convert_ppt_com(filepath: str, out_dir: str, max_slides: int) -> int:
     """使用 PowerPoint COM 导出幻灯片为 PNG（PDF 中转方案）。返回导出页数。"""
     import comtypes.client
 
-    abs_path = os.path.abspath(filepath)
+    abs_path = os.path.abspath(filepath).replace("/", "\\")
     ppt = comtypes.client.CreateObject("PowerPoint.Application")
     try:
-        pres = ppt.Presentations.Open(abs_path, ReadOnly=True, WithWindow=False)
+        # PowerPoint Open: ReadOnly=-1, Untitled=0, WithWindow=0
+        pres = ppt.Presentations.Open(abs_path, -1, 0, 0)
         try:
             with tempfile.TemporaryDirectory(prefix="ppt2img_ppt_") as tmpdir:
-                pdf_path = os.path.join(tmpdir, "output.pdf")
+                pdf_path = os.path.join(tmpdir, "output.pdf").replace("/", "\\")
                 # ppFixedFormatTypePDF = 2
                 pres.ExportAsFixedFormat(pdf_path, 2)
                 pres.Close()
