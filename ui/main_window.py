@@ -8,14 +8,15 @@ from typing import List, Optional
 from PyQt6.QtCore import Qt, QSettings
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
-    QApplication, QFileDialog, QHBoxLayout, QLabel, QMainWindow,
+    QApplication, QComboBox, QFileDialog, QHBoxLayout, QLabel, QMainWindow,
     QMessageBox, QProgressBar, QPushButton, QScrollArea, QSpinBox,
     QLineEdit, QTextEdit, QVBoxLayout, QWidget,
 )
 
 from core.converter import (
     ConvertResult, ConvertWorker, detect_backends, backend_display_name,
-    BACKEND_LIBREOFFICE, _find_libreoffice,
+    BACKEND_LIBREOFFICE, BACKEND_WPS_COM, BACKEND_PPT_COM,
+    BACKEND_PPT_MAC, _find_libreoffice,
 )
 from core.scanner import scan_ppt_files
 
@@ -30,6 +31,7 @@ _TEXT = "#191919"
 _TEXT2 = "#888888"
 _GREEN = "#07C160"
 _RED = "#FA5151"
+_ORANGE = "#FF9500"
 
 
 def _global_qss() -> str:
@@ -69,6 +71,13 @@ def _global_qss() -> str:
         padding: 2px 10px;
         font-size: 12px;
     }}
+    QLabel#badge_orange {{
+        color: white;
+        background: {_ORANGE};
+        border-radius: 10px;
+        padding: 2px 10px;
+        font-size: 12px;
+    }}
     QLineEdit {{
         background: {_INPUT};
         border: 1px solid {_SEP};
@@ -77,6 +86,13 @@ def _global_qss() -> str:
         color: {_TEXT};
     }}
     QSpinBox {{
+        background: {_INPUT};
+        border: 1px solid {_SEP};
+        border-radius: 8px;
+        padding: 6px 10px;
+        color: {_TEXT};
+    }}
+    QComboBox {{
         background: {_INPUT};
         border: 1px solid {_SEP};
         border-radius: 8px;
@@ -155,7 +171,7 @@ class MainWindow(QMainWindow):
         self._settings = QSettings("ppt2img", "PPT2Img")
         self._worker: Optional[ConvertWorker] = None
         self._ppt_files: List[str] = []
-        self._backend: Optional[str] = None
+        self._backends: List[str] = []  # 所有检测到的后端
         self._soffice_path: Optional[str] = None
 
         self._build_ui()
@@ -215,6 +231,17 @@ class MainWindow(QMainWindow):
         self._engine_hint.setObjectName("hint")
         self._engine_hint.setWordWrap(True)
         lay.addWidget(self._engine_hint)
+
+        # 引擎选择下拉框
+        self._engine_row = QWidget()
+        engine_lay = QHBoxLayout(self._engine_row)
+        engine_lay.setContentsMargins(0, 0, 0, 0)
+        engine_lay.addWidget(QLabel("选择引擎:"))
+        self._engine_combo = QComboBox()
+        self._engine_combo.currentIndexChanged.connect(self._on_engine_changed)
+        engine_lay.addWidget(self._engine_combo, 1)
+        self._engine_row.hide()
+        lay.addWidget(self._engine_row)
 
         # LibreOffice 手动选择行（默认隐藏）
         self._lo_row = QWidget()
@@ -376,16 +403,40 @@ class MainWindow(QMainWindow):
     # 引擎检测
     # ------------------------------------------------------------------
     def _detect_engine(self):
-        backends = detect_backends()
-        if backends:
-            self._backend = backends[0]
-            name = backend_display_name(self._backend)
-            self._engine_badge.setText(f"已就绪: {name}")
-            self._engine_badge.setObjectName("badge_green")
-            self._engine_hint.setText(
-                f"检测到 {name}，将使用它来导出 PPT 幻灯片。"
-            )
-            if self._backend == BACKEND_LIBREOFFICE:
+        self._backends = detect_backends()
+        if self._backends:
+            # 显示所有检测到的引擎
+            names = [backend_display_name(b) for b in self._backends]
+            primary = names[0]
+
+            if len(self._backends) == 1:
+                self._engine_badge.setText(f"已就绪: {primary}")
+                self._engine_badge.setObjectName("badge_green")
+                self._engine_hint.setText(
+                    f"检测到 {primary}，将使用它来导出 PPT 幻灯片。\n"
+                    f"如果转换失败，会自动尝试其他可用引擎。"
+                )
+            else:
+                self._engine_badge.setText(f"已就绪: {primary}")
+                self._engine_badge.setObjectName("badge_green")
+                self._engine_hint.setText(
+                    f"检测到 {len(self._backends)} 个引擎: {', '.join(names)}\n"
+                    f"默认使用 {primary}，失败时自动切换备选引擎。\n"
+                    f"也可以在下方手动选择优先使用的引擎。"
+                )
+                # 显示引擎选择下拉框
+                self._engine_combo.blockSignals(True)
+                self._engine_combo.clear()
+                for b in self._backends:
+                    self._engine_combo.addItem(
+                        f"{backend_display_name(b)}（优先）", b
+                    )
+                self._engine_combo.setCurrentIndex(0)
+                self._engine_combo.blockSignals(False)
+                self._engine_row.show()
+
+            # 设置 LibreOffice 路径
+            if BACKEND_LIBREOFFICE in self._backends:
                 self._soffice_path = _find_libreoffice()
         else:
             self._engine_badge.setText("未检测到转换引擎")
@@ -399,21 +450,34 @@ class MainWindow(QMainWindow):
             else:
                 self._engine_hint.setText(
                     "未检测到 WPS、PowerPoint 或 LibreOffice。\n"
-                    "请安装 WPS Office 或从 libreoffice.org 下载安装免费的 LibreOffice。"
+                    "请安装 WPS Office、Microsoft Office 或从 libreoffice.org 下载安装免费的 LibreOffice。"
                 )
             self._lo_row.show()
-            # 尝试读取上次保存的路径
             saved = self._settings.value("soffice_path", "")
             if saved and os.path.isfile(saved):
                 self._lo_path.setText(saved)
                 self._soffice_path = saved
-                self._backend = BACKEND_LIBREOFFICE
-                self._engine_badge.setText(f"已就绪: LibreOffice")
+                self._backends = [BACKEND_LIBREOFFICE]
+                self._engine_badge.setText("已就绪: LibreOffice")
                 self._engine_badge.setObjectName("badge_green")
         # 刷新样式
         self._engine_badge.style().unpolish(self._engine_badge)
         self._engine_badge.style().polish(self._engine_badge)
         self._update_start_btn()
+
+    def _on_engine_changed(self, index: int):
+        """用户手动切换优先引擎时，调整后端顺序。"""
+        if index < 0 or index >= len(self._backends):
+            return
+        # 把选中的引擎放到第一位，其余保持原序
+        selected = self._backends[index]
+        new_order = [selected] + [b for b in self._backends if b != selected]
+        self._backends = new_order
+        name = backend_display_name(selected)
+        self._engine_badge.setText(f"已就绪: {name}")
+        self._engine_hint.setText(
+            f"已切换为优先使用 {name}，失败时自动尝试其他引擎。"
+        )
 
     def _browse_libreoffice(self):
         if sys.platform == "darwin":
@@ -431,8 +495,9 @@ class MainWindow(QMainWindow):
         if path:
             self._lo_path.setText(path)
             self._soffice_path = path
-            self._backend = BACKEND_LIBREOFFICE
             self._settings.setValue("soffice_path", path)
+            if BACKEND_LIBREOFFICE not in self._backends:
+                self._backends.append(BACKEND_LIBREOFFICE)
             self._engine_badge.setText("已就绪: LibreOffice")
             self._engine_badge.setObjectName("badge_green")
             self._engine_badge.style().unpolish(self._engine_badge)
@@ -502,7 +567,7 @@ class MainWindow(QMainWindow):
     # 按钮状态
     # ------------------------------------------------------------------
     def _update_start_btn(self):
-        can_start = bool(self._backend and self._ppt_files)
+        can_start = bool(self._backends and self._ppt_files)
         self._start_btn.setEnabled(can_start)
 
     # ------------------------------------------------------------------
@@ -527,11 +592,17 @@ class MainWindow(QMainWindow):
         self._start_btn.setEnabled(False)
         self._cancel_btn.show()
 
+        # 日志：显示当前引擎配置
+        names = [backend_display_name(b) for b in self._backends]
+        self._log_text.append(
+            f"引擎优先级: {' → '.join(names)}（失败自动降级）"
+        )
+
         self._worker = ConvertWorker(
             ppt_files=self._ppt_files,
             output_dir=output_dir,
             max_slides=self._pages_spin.value(),
-            backend=self._backend,
+            backends=self._backends,
             soffice_path=self._soffice_path,
         )
         self._worker.progress.connect(self._on_progress)
@@ -576,7 +647,7 @@ class MainWindow(QMainWindow):
         summary += f"<br>共导出 {total_pages} 页图片"
         self._result_summary.setText(summary)
 
-        # 失败详情
+        # 失败详情（包含引擎信息）
         if fail > 0:
             lines = []
             for r in results:
