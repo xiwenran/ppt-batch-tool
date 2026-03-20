@@ -10,14 +10,7 @@ permissions:
 
 jobs:
   build-macos:
-    strategy:
-      matrix:
-        include:
-          - runner: macos-13
-            arch: x86_64
-          - runner: macos-14
-            arch: arm64
-    runs-on: ${{ matrix.runner }}
+    runs-on: macos-14
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -48,7 +41,7 @@ jobs:
       - name: 打包为 DMG
         run: |
           APP_NAME="PPT转图片"
-          DMG_NAME="${APP_NAME}_macos_${{ matrix.arch }}.dmg"
+          DMG_NAME="${APP_NAME}_macos_arm64.dmg"
           DMG_TMP="dist/dmg_tmp"
 
           mkdir -p "$DMG_TMP"
@@ -87,5 +80,5 @@ jobs:
       - name: 保留 Artifact 备份
         uses: actions/upload-artifact@v4
         with:
-          name: PPT转图片_macos_${{ matrix.arch }}
+          name: PPT转图片_macos_arm64
           path: dist/${{ env.DMG_NAME }}
