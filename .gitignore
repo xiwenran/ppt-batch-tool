@@ -8,3 +8,4 @@ dist/
 *.dmg
 _build_info.py
 .DS_Store
+CLAUDE.md
