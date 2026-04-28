@@ -5,6 +5,7 @@
 ## 功能
 
 - 递归扫描指定文件夹中所有 PPT 文件（`.ppt` `.pptx` `.pps` `.ppsx`）
+- 支持单个 PPT 文件直接输入（不复制，避免 macOS 授权弹窗）
 - 每个 PPT 导出前 N 页为 PNG 图片（默认 17 页，可调整）
 - 自动清理文件名（去除版权声明、平台标记等）
 - 每个 PPT 的图片存入独立文件夹
@@ -100,16 +101,63 @@ python3 cli.py detect
 ### 批量转换
 
 ```bash
+# 文件夹模式（递归扫描所有 PPT）
 python3 cli.py convert \
   --input <PPT文件夹> \
   --output <图片输出目录> \
   --max-slides 17
+
+# 单文件模式（通过 pipeline.py 自动传入，也可手动用）
+python3 cli.py convert \
+  --input <PPT文件夹> \
+  --output <图片输出目录> \
+  --only-file <文件名.pptx>
 ```
 
-macOS 上首次运行会弹出 PowerPoint 授权窗口，点「允许」后本次批量不再重复弹出。
+**macOS 授权说明**：首次运行会弹出 PowerPoint 授权窗口，点「允许」后本次批量不再重复弹出。单文件模式不复制文件，直接在原始目录操作，不触发额外授权。
+
+### 与融景联动（pipeline.py）
+
+`pipeline.py` 把「PPT 导出图片」和「融景透视合成」串联成一键流水线：
+
+```bash
+# 整个文件夹（使用全部融景模板）
+python3 pipeline.py run \
+  --input <PPT文件夹> \
+  --output <输出目录>
+
+# 单个 PPT（指定模板）
+python3 pipeline.py run \
+  --input <单个PPT文件.pptx> \
+  --output <输出目录> \
+  --templates 3
+
+# 自定义页数和模板
+python3 pipeline.py run \
+  --input <PPT文件夹> \
+  --output <输出目录> \
+  --templates 1 2 3 \
+  --max-slides 10
+```
+
+输出结构：
+```
+输出目录/
+  PPT图片/          ← 原始导出的 PNG（可单独使用）
+    课件A/
+      1.png  2.png ...
+  合成图/           ← 融景合成完的成品
+    课件A/
+      3/            ← 模板编号
+        1.jpg  2.jpg ...
+```
 
 ### Claude Code Skill
 
-已提供 `ppt-batch-tool` Skill（`~/.claude/skills/ppt-batch-tool/SKILL.md`），在 Claude Code 中可直接用自然语言触发：
+已提供两个 Skill，在 Claude Code 中可直接用自然语言触发：
 
-> 「把这个文件夹里所有 PPT 转成图片，输出到 Downloads」
+- `ppt-batch-tool`（`~/.claude/skills/ppt-batch-tool/SKILL.md`）：仅导出图片
+  > 「把这个文件夹里所有 PPT 转成图片，输出到 Downloads」
+
+- `ppt-notes-pipeline`（`~/.claude/skills/ppt-notes-pipeline/SKILL.md`）：导出 + 融景合成一键完成
+  > 「把这个 PPT 一键做成笔记图，用第3个模板」
