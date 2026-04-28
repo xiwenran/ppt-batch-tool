@@ -3,13 +3,13 @@
 PPT → 图片 → 融景合成 一键流水线
 
 流程：
-  1. 扫描输入文件夹中的 PPT 文件
+  1. 扫描输入（文件夹 或 单个 PPT 文件）中的 PPT 文件
   2. 用 ppt-batch-tool 导出为 PNG 图片（存到 输出目录/PPT图片/）
   3. 用融景对每组图片做透视合成（存到 输出目录/合成图/）
 
 用法：
   python3 pipeline.py run --input <PPT文件夹> --output <输出目录>
-  python3 pipeline.py run --input <PPT文件夹> --output <输出目录> --templates 1 3 5
+  python3 pipeline.py run --input <单个PPT文件> --output <输出目录> --templates 3
   python3 pipeline.py run --input <PPT文件夹> --output <输出目录> --max-slides 10
 """
 
@@ -50,14 +50,25 @@ def get_all_templates() -> list[str]:
     return valid
 
 
-def cmd_run(input_folder: str, output_dir: str, templates: list[str] | None,
+def cmd_run(input_path: str, output_dir: str, templates: list[str] | None,
             max_slides: int, fmt: str):
-    input_folder = os.path.expanduser(input_folder)
+    import shutil
+    input_path = os.path.expanduser(input_path)
     output_dir = os.path.expanduser(output_dir)
 
-    if not os.path.isdir(input_folder):
-        print(f"[错误] 输入文件夹不存在：{input_folder}", file=sys.stderr)
+    if not os.path.exists(input_path):
+        print(f"[错误] 输入路径不存在：{input_path}", file=sys.stderr)
         sys.exit(1)
+
+    # 单文件模式：不复制文件，直接用原始目录 + --only-file 过滤
+    # （复制到新目录会触发 PowerPoint AppleScript 授权弹窗）
+    only_file = None
+    if os.path.isfile(input_path):
+        only_file = os.path.basename(input_path)
+        input_folder = os.path.dirname(os.path.abspath(input_path))
+        print(f"单文件模式：{only_file}", flush=True)
+    else:
+        input_folder = input_path
 
     # 默认使用全部模板
     if not templates:
@@ -72,13 +83,14 @@ def cmd_run(input_folder: str, output_dir: str, templates: list[str] | None,
     # ──────────────────────────────────────────
     # Step 1：PPT → 图片
     # ──────────────────────────────────────────
-    rc = run(
-        ["python3", os.path.join(PPT_TOOL_DIR, "cli.py"), "convert",
-         "--input", input_folder,
-         "--output", ppt_images_dir,
-         "--max-slides", str(max_slides)],
-        f"Step 1 / 2  PPT 导出为图片（最多 {max_slides} 页/PPT）"
-    )
+    convert_cmd = ["python3", os.path.join(PPT_TOOL_DIR, "cli.py"), "convert",
+                   "--input", input_folder,
+                   "--output", ppt_images_dir,
+                   "--max-slides", str(max_slides)]
+    if only_file:
+        convert_cmd += ["--only-file", only_file]
+
+    rc = run(convert_cmd, f"Step 1 / 2  PPT 导出为图片（最多 {max_slides} 页/PPT）")
     if rc != 0:
         print("\n[错误] PPT 转图片失败，流水线中止", file=sys.stderr)
         sys.exit(rc)
@@ -135,12 +147,13 @@ def cmd_run(input_folder: str, output_dir: str, templates: list[str] | None,
     print(f"  └ 合成图总数：约 {total_composed} 张")
 
 
+
 def main():
     parser = argparse.ArgumentParser(description="PPT → 图片 → 融景合成 一键流水线")
     sub = parser.add_subparsers(dest="cmd")
 
     p = sub.add_parser("run", help="运行完整流水线")
-    p.add_argument("--input", required=True, help="PPT 文件所在文件夹（递归扫描）")
+    p.add_argument("--input", required=True, help="PPT 文件所在文件夹（递归扫描），或单个 PPT 文件路径")
     p.add_argument("--output", required=True, help="输出根目录（自动创建 PPT图片/ 和 合成图/ 子目录）")
     p.add_argument("--templates", nargs="+", default=None,
                    help="融景模板名称，不填则使用全部可用模板")

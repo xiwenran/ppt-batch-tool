@@ -31,7 +31,7 @@ def cmd_detect():
         print(f"  LibreOffice 路径：{lo}")
 
 
-def cmd_convert(input_folder: str, output_dir: str, max_slides: int):
+def cmd_convert(input_folder: str, output_dir: str, max_slides: int, only_file: str | None = None):
     from core.scanner import scan_ppt_files
     from core.filename_cleaner import clean_filename
     from core.converter import (
@@ -53,6 +53,11 @@ def cmd_convert(input_folder: str, output_dir: str, max_slides: int):
         sys.exit(1)
 
     ppt_files = scan_ppt_files(input_folder)
+    if only_file:
+        ppt_files = [f for f in ppt_files if os.path.basename(f) == only_file]
+        if not ppt_files:
+            print(f"[错误] 在 {input_folder} 中没有找到文件：{only_file}", file=sys.stderr)
+            sys.exit(1)
     if not ppt_files:
         print(f"[错误] 在 {input_folder} 中没有找到 PPT 文件", file=sys.stderr)
         sys.exit(1)
@@ -122,13 +127,14 @@ def main():
     p.add_argument("--input", required=True, help="包含 PPT 文件的文件夹（递归扫描）")
     p.add_argument("--output", required=True, help="图片输出目录")
     p.add_argument("--max-slides", type=int, default=17, help="每个 PPT 最多导出页数（默认 17）")
+    p.add_argument("--only-file", default=None, help="只处理指定文件名（单文件模式，由 pipeline 传入）")
 
     args = parser.parse_args()
 
     if args.cmd == "detect":
         cmd_detect()
     elif args.cmd == "convert":
-        cmd_convert(args.input, args.output, args.max_slides)
+        cmd_convert(args.input, args.output, args.max_slides, args.only_file)
     else:
         parser.print_help()
 
