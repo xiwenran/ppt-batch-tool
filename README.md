@@ -84,3 +84,32 @@ pyinstaller --windowed --name "PPT转图片" --noconfirm main.py
 - 各种括号内容（【】、[]、（））
 
 例如：`精美课件【公众号：XXX】侵删.pptx` → `精美课件/`
+
+---
+
+## 命令行工具（CLI）
+
+除图形界面外，提供 `cli.py` 支持无界面批量处理，可由 Claude Code 等 AI 工具直接调用。
+
+### 检测可用引擎
+
+```bash
+python3 cli.py detect
+```
+
+### 批量转换
+
+```bash
+python3 cli.py convert \
+  --input <PPT文件夹> \
+  --output <图片输出目录> \
+  --max-slides 17
+```
+
+macOS 上首次运行会弹出 PowerPoint 授权窗口，点「允许」后本次批量不再重复弹出。
+
+### Claude Code Skill
+
+已提供 `ppt-batch-tool` Skill（`~/.claude/skills/ppt-batch-tool/SKILL.md`），在 Claude Code 中可直接用自然语言触发：
+
+> 「把这个文件夹里所有 PPT 转成图片，输出到 Downloads」
