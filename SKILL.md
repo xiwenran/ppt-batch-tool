@@ -53,6 +53,10 @@ cd ~/ppt-batch-tool && python3 cli.py convert \
 - 输出目录在哪里
 - 如有失败，说明哪个文件出了什么问题
 
+**Token 节制要求**：转换完成后，读取输出目录下的 `convert_summary.json`，只汇报
+`success_count`、`failed_count`、`output_dir` 和 `failed_files` 中的文件名。
+不要展开所有成功文件清单，不要列出所有图片路径。
+
 ## 输出结构
 
 ```

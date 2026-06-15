@@ -9,6 +9,7 @@ PPT转图片 CLI — 命令行接口，供 Claude Code Skill 调用。
 """
 
 import argparse
+import json
 import os
 import shutil
 import sys
@@ -115,6 +116,29 @@ def cmd_convert(input_folder: str, output_dir: str, max_slides: int, only_file: 
         for name, err in failed:
             print(f"  ✗ {name}：{err}")
     print(f"输出目录：{output_dir}")
+
+    # JSON summary — 供 Skill/Agent 读取，只汇报数字和失败文件，不展开所有成功路径
+    skipped = total - success - len(failed)
+    # 采样最多 3 个成功输出目录作为样本
+    sample_outputs = []
+    if os.path.isdir(output_dir):
+        for entry in sorted(os.listdir(output_dir))[:3]:
+            candidate = os.path.join(output_dir, entry)
+            if os.path.isdir(candidate):
+                sample_outputs.append(candidate)
+    summary = {
+        "input_dir": input_folder,
+        "output_dir": output_dir,
+        "success_count": success,
+        "failed_count": len(failed),
+        "skipped_count": skipped,
+        "failed_files": [{"file": name, "error": err} for name, err in failed],
+        "sample_outputs": sample_outputs,
+    }
+    summary_path = os.path.join(output_dir, "convert_summary.json")
+    with open(summary_path, "w", encoding="utf-8") as f:
+        json.dump(summary, f, ensure_ascii=False, indent=2)
+    print(f"\n[JSON summary] {summary_path}")
 
 
 def main():
