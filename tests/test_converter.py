@@ -10,6 +10,7 @@ from core.converter import (
     BACKEND_WORD_COM,
     BACKEND_WORD_MAC,
     _applescript_string,
+    _word_mac_open_command,
     backends_for_file,
     convert_one_with_fallback,
 )
@@ -47,6 +48,14 @@ class ConverterBackendSelectionTest(unittest.TestCase):
             _applescript_string('/tmp/a "quoted" \\ file.docx'),
             '"/tmp/a \\"quoted\\" \\\\ file.docx"',
         )
+
+    def test_word_mac_open_command_enables_repair_without_recent_files(self):
+        command = _word_mac_open_command('/tmp/a "quoted".docx')
+
+        self.assertIn("open and repair true", command)
+        self.assertIn("read only true", command)
+        self.assertIn("add to recent files false", command)
+        self.assertIn('\\"quoted\\"', command)
 
 
 class ConverterFallbackBehaviorTest(unittest.TestCase):

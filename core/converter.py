@@ -145,6 +145,14 @@ def _applescript_string(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+def _word_mac_open_command(filepath: str) -> str:
+    """Build Word AppleScript open command with automatic repair enabled."""
+    return (
+        f"open file name POSIX file {_applescript_string(filepath)} "
+        "read only true add to recent files false open and repair true"
+    )
+
+
 def is_ppt_file(filepath: str) -> bool:
     return os.path.splitext(filepath)[1].lower() in PPT_EXTENSIONS
 
@@ -219,10 +227,17 @@ def _convert_word_com(filepath: str, out_dir: str, max_slides: int,
         log("    [Word] 正在创建 Word 实例...")
     word = comtypes.client.CreateObject("Word.Application")
     word.Visible = False
+    word.DisplayAlerts = 0
     try:
         if log:
             log(f"    [Word] 正在打开文件: {os.path.basename(filepath)}")
-        doc = word.Documents.Open(abs_path, ReadOnly=True)
+        doc = word.Documents.Open(
+            abs_path,
+            ReadOnly=True,
+            AddToRecentFiles=False,
+            ConfirmConversions=False,
+            OpenAndRepair=True,
+        )
         try:
             pdf_dir = os.path.join(os.path.dirname(out_dir), ".ppt2img_tmp")
             os.makedirs(pdf_dir, exist_ok=True)
@@ -301,7 +316,7 @@ def _word_mac_batch_export_pdf(word_files: List[str], pdf_dir: str,
         path_map[abs_path] = pdf_path
         file_commands.append(f'''
         try
-            open POSIX file {_applescript_string(abs_path)}
+            {_word_mac_open_command(abs_path)}
             save as active document file name {_applescript_string(pdf_path)} file format format PDF
             close active document saving no
         end try''')
