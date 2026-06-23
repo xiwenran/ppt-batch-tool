@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-PPT转图片 CLI — 命令行接口，供 Claude Code Skill 调用。
+PPT / Word 转图片 CLI — 命令行接口，供 Claude Code Skill 调用。
 不依赖 PyQt6，直接调用 core/ 的转换函数。
 
 用法：
@@ -13,7 +13,6 @@ import json
 import os
 import shutil
 import sys
-import tempfile
 
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -26,19 +25,20 @@ def cmd_detect():
         for b in backends:
             print(f"  ✅ {backend_display_name(b)}")
     else:
-        print("❌ 没有找到可用引擎（需要安装 Microsoft PowerPoint 或 LibreOffice）")
+        print("❌ 没有找到可用引擎（需要安装 Microsoft Office 或 LibreOffice）")
     lo = _find_libreoffice()
     if lo:
         print(f"  LibreOffice 路径：{lo}")
 
 
 def cmd_convert(input_folder: str, output_dir: str, max_slides: int, only_file: str | None = None):
-    from core.scanner import scan_ppt_files
+    from core.scanner import scan_supported_files
     from core.filename_cleaner import clean_filename
     from core.converter import (
         detect_backends, convert_one_with_fallback,
-        _ppt_mac_batch_export_pdf, _find_libreoffice,
-        BACKEND_PPT_MAC, _unique_dir,
+        _ppt_mac_batch_export_pdf, _word_mac_batch_export_pdf,
+        _find_libreoffice, BACKEND_PPT_MAC, BACKEND_WORD_MAC,
+        backends_for_file, is_ppt_file, is_word_file,
     )
 
     input_folder = os.path.expanduser(input_folder)
@@ -50,65 +50,81 @@ def cmd_convert(input_folder: str, output_dir: str, max_slides: int, only_file: 
 
     backends = detect_backends()
     if not backends:
-        print("[错误] 没有可用的转换引擎，请安装 Microsoft PowerPoint 或 LibreOffice", file=sys.stderr)
+        print("[错误] 没有可用的转换引擎，请安装 Microsoft Office 或 LibreOffice", file=sys.stderr)
         sys.exit(1)
 
-    ppt_files = scan_ppt_files(input_folder)
+    source_files = scan_supported_files(input_folder)
     if only_file:
-        ppt_files = [f for f in ppt_files if os.path.basename(f) == only_file]
-        if not ppt_files:
+        source_files = [f for f in source_files if os.path.basename(f) == only_file]
+        if not source_files:
             print(f"[错误] 在 {input_folder} 中没有找到文件：{only_file}", file=sys.stderr)
             sys.exit(1)
-    if not ppt_files:
-        print(f"[错误] 在 {input_folder} 中没有找到 PPT 文件", file=sys.stderr)
+    if not source_files:
+        print(f"[错误] 在 {input_folder} 中没有找到受支持的 PPT / Word 文件", file=sys.stderr)
         sys.exit(1)
 
     os.makedirs(output_dir, exist_ok=True)
-    total = len(ppt_files)
-    print(f"找到 {total} 个 PPT 文件，使用引擎：{backends[0]}")
+    total = len(source_files)
+    print(f"找到 {total} 个 PPT / Word 文件，使用引擎：{backends[0]}")
     print(f"输出目录：{output_dir}\n")
 
     soffice_path = _find_libreoffice()
-    primary_backend = backends[0]
-
-    # macOS PowerPoint：先批量导出所有 PDF（只需授权一次）
-    pdf_map = {}
-    tmp_pdf_dir = None
-    if primary_backend == BACKEND_PPT_MAC:
-        tmp_pdf_dir = os.path.join(output_dir, ".ppt2img_pdf_tmp")
-        print(f"正在通过 PowerPoint 批量导出 PDF（此步骤可能弹出授权窗口，点一次允许即可）...")
-        pdf_map = _ppt_mac_batch_export_pdf(ppt_files, tmp_pdf_dir, log=print)
-        print(f"PDF 导出完成：{len(pdf_map)}/{total} 个成功\n")
+    mac_pdf_map: dict[str, tuple[str, str]] = {}
+    tmp_pdf_dirs: list[str] = []
+    if sys.platform == "darwin":
+        for label, backend, exporter, predicate in [
+            ("PowerPoint", BACKEND_PPT_MAC, _ppt_mac_batch_export_pdf, is_ppt_file),
+            ("Word", BACKEND_WORD_MAC, _word_mac_batch_export_pdf, is_word_file),
+        ]:
+            eligible = [
+                path for path in source_files
+                if predicate(path) and backends_for_file(path, backends)[:1] == [backend]
+            ]
+            if not eligible:
+                continue
+            tmp_pdf_dir = os.path.join(output_dir, f".ppt2img_{backend}_pdf_tmp")
+            tmp_pdf_dirs.append(tmp_pdf_dir)
+            print(f"正在通过 {label} 批量导出 PDF（此步骤可能弹出授权窗口，点一次允许即可）...")
+            try:
+                pdf_map = exporter(eligible, tmp_pdf_dir, log=print)
+            except Exception as e:
+                print(f"    ⚠ {label} 批量导出失败：{e}")
+                print("    → 将回退到逐文件转换，继续尝试其他引擎\n")
+                continue
+            for source_path, pdf_path in pdf_map.items():
+                mac_pdf_map[source_path] = (pdf_path, backend)
+            print(f"PDF 导出完成：{len(pdf_map)}/{len(eligible)} 个成功\n")
 
     success, failed = 0, []
     try:
-        for idx, filepath in enumerate(ppt_files, 1):
+        for idx, filepath in enumerate(source_files, 1):
             basename = os.path.splitext(os.path.basename(filepath))[0]
             cleaned = clean_filename(basename)
-            out_dir = _unique_dir(os.path.join(output_dir, cleaned))
+            out_dir = os.path.join(output_dir, cleaned)
             print(f"[{idx}/{total}] {os.path.basename(filepath)} → {cleaned}/")
 
             try:
                 abs_path = os.path.abspath(filepath)
-                if primary_backend == BACKEND_PPT_MAC:
-                    pdf_path = pdf_map.get(abs_path)
-                    if not pdf_path:
-                        raise RuntimeError("PowerPoint PDF 导出失败（文件可能已损坏或格式不支持）")
-                    pages, used = convert_one_with_fallback(
-                        filepath, out_dir, max_slides, backends, pdf_path=pdf_path, log=print
+                pdf_entry = mac_pdf_map.get(abs_path)
+                if pdf_entry:
+                    pdf_path, pdf_backend = pdf_entry
+                    pages, used, actual_out_dir = convert_one_with_fallback(
+                        filepath, out_dir, max_slides, backends,
+                        pdf_path=pdf_path, pdf_backend=pdf_backend, log=print
                     )
                 else:
-                    pages, used = convert_one_with_fallback(
+                    pages, used, actual_out_dir = convert_one_with_fallback(
                         filepath, out_dir, max_slides, backends, soffice_path, log=print
                     )
-                print(f"       ✅ 导出 {pages} 页")
+                print(f"       ✅ 导出 {pages} 页到 {os.path.basename(actual_out_dir)}/")
                 success += 1
             except Exception as e:
                 print(f"       ❌ 失败：{e}")
                 failed.append((os.path.basename(filepath), str(e)))
     finally:
-        if tmp_pdf_dir and os.path.isdir(tmp_pdf_dir):
-            shutil.rmtree(tmp_pdf_dir, ignore_errors=True)
+        for tmp_pdf_dir in tmp_pdf_dirs:
+            if os.path.isdir(tmp_pdf_dir):
+                shutil.rmtree(tmp_pdf_dir, ignore_errors=True)
 
     print(f"\n完成！成功 {success}/{total} 个")
     if failed:
@@ -142,15 +158,15 @@ def cmd_convert(input_folder: str, output_dir: str, max_slides: int, only_file: 
 
 
 def main():
-    parser = argparse.ArgumentParser(description="PPT转图片命令行工具")
+    parser = argparse.ArgumentParser(description="PPT / Word 转图片命令行工具")
     sub = parser.add_subparsers(dest="cmd")
 
     sub.add_parser("detect", help="检测可用的转换引擎")
 
-    p = sub.add_parser("convert", help="批量转换 PPT 为 PNG 图片")
-    p.add_argument("--input", required=True, help="包含 PPT 文件的文件夹（递归扫描）")
+    p = sub.add_parser("convert", help="批量转换 PPT / Word 为 PNG 图片")
+    p.add_argument("--input", required=True, help="包含 PPT / Word 文件的文件夹（递归扫描）")
     p.add_argument("--output", required=True, help="图片输出目录")
-    p.add_argument("--max-slides", type=int, default=17, help="每个 PPT 最多导出页数（默认 17）")
+    p.add_argument("--max-slides", type=int, default=17, help="每个文件最多导出页数（默认 17）")
     p.add_argument("--only-file", default=None, help="只处理指定文件名（单文件模式，由 pipeline 传入）")
 
     args = parser.parse_args()

@@ -1,12 +1,12 @@
 ---
 name: ppt-batch-tool
-description: PPT批量转图片：把文件夹中的PPT/PPTX文件批量导出为PNG图片，自动清理文件名。触发词：PPT转图片、把PPT转成图片、批量导出PPT、PPT转PNG、把课件转成图片、导出幻灯片截图。
+description: PPT/Word批量转图片：把文件夹中的PPT或Word文件批量导出为PNG图片，自动清理文件名。触发词：PPT转图片、Word转图片、批量导出PPT、批量导出Word、PPT转PNG、Word转PNG、把课件转成图片、导出幻灯片截图。
 ---
 
-# PPT 批量转图片 Skill
+# PPT / Word 批量转图片 Skill
 
-将指定文件夹下的所有 PPT/PPTX 文件递归扫描并导出为 PNG 图片。
-使用 Microsoft PowerPoint（macOS）或 LibreOffice 作为转换引擎。
+将指定文件夹下的所有 PPT / Word 文件递归扫描并导出为 PNG 图片。
+使用 Microsoft PowerPoint / Word 或 LibreOffice 作为转换引擎。
 
 ## CLI 路径
 
@@ -20,10 +20,11 @@ python3 ~/ppt-batch-tool/cli.py <子命令>
 
 用户会说类似：
 - "把这个文件夹的 PPT 都转成图片"
+- "把这个文件夹的 Word 都转成图片"
 - "帮我导出 ~/Downloads/课件/ 里所有 PPT 的前10页"
 
 需要确认两件事：
-1. **输入文件夹**：哪个目录（递归扫描，会找到所有子文件夹里的 PPT）
+1. **输入文件夹**：哪个目录（递归扫描，会找到所有子文件夹里的 PPT / Word）
 2. **输出目录**：没有指定时默认用 `输入文件夹/../PPT图片/`
 3. **最多导出页数**：默认 17 页，用户有特殊需求时调整
 
@@ -44,7 +45,7 @@ cd ~/ppt-batch-tool && python3 cli.py convert \
   --max-slides <页数>
 ```
 
-**注意**：macOS 上首次运行会弹出 PowerPoint 授权窗口，告诉用户点「允许」即可，之后本次批量不再弹。
+**注意**：macOS 上首次运行会弹出 PowerPoint 或 Word 授权窗口，告诉用户点「允许」即可，之后本次批量不再弹。
 
 ### Step 3：报告结果
 
@@ -72,7 +73,7 @@ cd ~/ppt-batch-tool && python3 cli.py convert \
 
 ## 注意事项
 
-- 支持格式：`.ppt` `.pptx` `.pps` `.ppsx`
+- 支持格式：`.ppt` `.pptx` `.pps` `.ppsx` `.doc` `.docx` `.docm` `.dot` `.dotx` `.dotm`
 - 自动跳过 Office 临时文件（`~$` 开头）
 - 文件名清理会自动去掉：`【公众号：XXX】`、`@用户名`、`（转载）` 等常见标记
 - 如果输出文件夹已有同名子目录，自动追加 `_2`、`_3` 避免覆盖

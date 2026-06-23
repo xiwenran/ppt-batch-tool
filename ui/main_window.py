@@ -1,4 +1,4 @@
-"""PPT 批量导出图片 — 主窗口。"""
+"""PPT / Word 批量导出图片 — 主窗口。"""
 
 import os
 import subprocess
@@ -6,7 +6,6 @@ import sys
 from typing import List, Optional
 
 from PyQt6.QtCore import Qt, QSettings
-from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QHBoxLayout, QLabel, QMainWindow,
     QMessageBox, QProgressBar, QPushButton, QScrollArea, QSpinBox,
@@ -15,10 +14,9 @@ from PyQt6.QtWidgets import (
 
 from core.converter import (
     ConvertResult, ConvertWorker, detect_backends, backend_display_name,
-    BACKEND_LIBREOFFICE, BACKEND_PPT_COM,
-    BACKEND_PPT_MAC, _find_libreoffice,
+    BACKEND_LIBREOFFICE, BACKEND_PPT_MAC, _find_libreoffice,
 )
-from core.scanner import scan_ppt_files
+from core.scanner import scan_supported_files
 
 # ---------------------------------------------------------------------------
 # 主题色（WeChat 风格）
@@ -164,13 +162,13 @@ class MainWindow(QMainWindow):
 
     def __init__(self, build: str = "dev"):
         super().__init__()
-        self.setWindowTitle(f"PPT 转图片  [{build}]")
+        self.setWindowTitle(f"PPT / Word 转图片  [{build}]")
         self.setMinimumSize(640, 700)
         self.resize(700, 820)
 
         self._settings = QSettings("ppt2img", "PPT2Img")
         self._worker: Optional[ConvertWorker] = None
-        self._ppt_files: List[str] = []
+        self._source_files: List[str] = []
         self._backends: List[str] = []  # 所有检测到的后端
         self._soffice_path: Optional[str] = None
 
@@ -264,11 +262,14 @@ class MainWindow(QMainWindow):
     # --- Card 1: 选择文件夹 ---
     def _build_folder_card(self):
         card, lay = self._make_card()
-        h = QLabel("步骤 1: 选择 PPT 文件夹")
+        h = QLabel("步骤 1: 选择 PPT / Word 文件夹")
         h.setObjectName("h2")
         lay.addWidget(h)
 
-        hint = QLabel("递归扫描文件夹中所有 PPT 文件（.ppt .pptx .pps .ppsx）")
+        hint = QLabel(
+            "递归扫描文件夹中所有 PPT / Word 文件"
+            "（.ppt .pptx .pps .ppsx .doc .docx .docm .dot .dotx .dotm）"
+        )
         hint.setObjectName("hint")
         lay.addWidget(hint)
 
@@ -301,7 +302,7 @@ class MainWindow(QMainWindow):
         row1 = QWidget()
         r1l = QHBoxLayout(row1)
         r1l.setContentsMargins(0, 0, 0, 0)
-        r1l.addWidget(QLabel("每个 PPT 最多导出前"))
+        r1l.addWidget(QLabel("每个文件最多导出前"))
         self._pages_spin = QSpinBox()
         self._pages_spin.setRange(1, 999)
         self._pages_spin.setValue(17)
@@ -316,7 +317,7 @@ class MainWindow(QMainWindow):
         r2l.addWidget(QLabel("输出文件夹:"))
         self._output_input = QLineEdit()
         self._output_input.setReadOnly(True)
-        self._output_input.setPlaceholderText("默认为 PPT 文件夹下的「导出图片」子目录")
+        self._output_input.setPlaceholderText("默认为所选文件夹下的「导出图片」子目录")
         out_btn = QPushButton("修改")
         out_btn.clicked.connect(self._browse_output)
         r2l.addWidget(self._output_input, 1)
@@ -413,7 +414,7 @@ class MainWindow(QMainWindow):
                 self._engine_badge.setText(f"已就绪: {primary}")
                 self._engine_badge.setObjectName("badge_green")
                 self._engine_hint.setText(
-                    f"检测到 {primary}，将使用它来导出 PPT 幻灯片。\n"
+                    f"检测到 {primary}，将按文件类型导出 PPT / Word 页面。\n"
                     f"如果转换失败，会自动尝试其他可用引擎。"
                 )
             else:
@@ -443,13 +444,13 @@ class MainWindow(QMainWindow):
             self._engine_badge.setObjectName("badge_red")
             if sys.platform == "darwin":
                 self._engine_hint.setText(
-                    "未检测到 PowerPoint 或 LibreOffice。\n"
-                    "请安装 Microsoft PowerPoint 或从 libreoffice.org 下载安装免费的 LibreOffice。\n"
+                    "未检测到 PowerPoint、Word 或 LibreOffice。\n"
+                    "请安装 Microsoft Office，或从 libreoffice.org 下载安装免费的 LibreOffice。\n"
                     "安装后可手动选择 LibreOffice 路径。"
                 )
             else:
                 self._engine_hint.setText(
-                    "未检测到 PowerPoint 或 LibreOffice。\n"
+                    "未检测到 PowerPoint、Word 或 LibreOffice。\n"
                     "请安装 Microsoft Office 或从 libreoffice.org 下载安装免费的 LibreOffice。"
                 )
             self._lo_row.show()
@@ -467,10 +468,12 @@ class MainWindow(QMainWindow):
 
     def _on_engine_changed(self, index: int):
         """用户手动切换优先引擎时，调整后端顺序。"""
-        if index < 0 or index >= len(self._backends):
+        if index < 0:
             return
         # 把选中的引擎放到第一位，其余保持原序
-        selected = self._backends[index]
+        selected = self._engine_combo.itemData(index)
+        if not selected or selected not in self._backends:
+            return
         new_order = [selected] + [b for b in self._backends if b != selected]
         self._backends = new_order
         name = backend_display_name(selected)
@@ -510,9 +513,9 @@ class MainWindow(QMainWindow):
     def _browse_folder(self):
         last = self._settings.value("last_input_dir", "")
         if sys.platform == "darwin":
-            folder = self._mac_pick_folder("选择包含 PPT 文件的文件夹", last)
+            folder = self._mac_pick_folder("选择包含 PPT / Word 文件的文件夹", last)
         else:
-            folder = QFileDialog.getExistingDirectory(self, "选择 PPT 文件夹", last)
+            folder = QFileDialog.getExistingDirectory(self, "选择 PPT / Word 文件夹", last)
         if not folder:
             return
 
@@ -520,13 +523,13 @@ class MainWindow(QMainWindow):
         self._folder_input.setText(folder)
 
         # 立即扫描
-        self._ppt_files = scan_ppt_files(folder)
-        n = len(self._ppt_files)
+        self._source_files = scan_supported_files(folder)
+        n = len(self._source_files)
         if n > 0:
-            self._scan_badge.setText(f"找到 {n} 个 PPT 文件")
+            self._scan_badge.setText(f"找到 {n} 个 PPT / Word 文件")
             self._scan_badge.setObjectName("badge_green")
         else:
-            self._scan_badge.setText("未找到 PPT 文件")
+            self._scan_badge.setText("未找到 PPT / Word 文件")
             self._scan_badge.setObjectName("badge_red")
         self._scan_badge.style().unpolish(self._scan_badge)
         self._scan_badge.style().polish(self._scan_badge)
@@ -567,7 +570,7 @@ class MainWindow(QMainWindow):
     # 按钮状态
     # ------------------------------------------------------------------
     def _update_start_btn(self):
-        can_start = bool(self._backends and self._ppt_files)
+        can_start = bool(self._backends and self._source_files)
         self._start_btn.setEnabled(can_start)
 
     # ------------------------------------------------------------------
@@ -587,7 +590,7 @@ class MainWindow(QMainWindow):
         self._log_text.clear()
         self._progress.show()
         self._progress.setValue(0)
-        self._progress.setMaximum(len(self._ppt_files))
+        self._progress.setMaximum(len(self._source_files))
         self._status_label.show()
         self._start_btn.setEnabled(False)
         self._cancel_btn.show()
@@ -599,7 +602,7 @@ class MainWindow(QMainWindow):
         )
 
         self._worker = ConvertWorker(
-            ppt_files=self._ppt_files,
+            source_files=self._source_files,
             output_dir=output_dir,
             max_slides=self._pages_spin.value(),
             backends=self._backends,
@@ -639,7 +642,7 @@ class MainWindow(QMainWindow):
         total_pages = sum(r.pages_exported for r in results)
 
         summary = (
-            f"共处理 <b>{total}</b> 个 PPT，"
+            f"共处理 <b>{total}</b> 个 PPT / Word 文件，"
             f"<span style='color:{_GREEN}'>成功 {success} 个</span>"
         )
         if fail > 0:
